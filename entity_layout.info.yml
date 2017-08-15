@@ -1,0 +1,8 @@
+name: entity_layout
+type: module
+description: Provide ability to contributors to set a custom entity layouton a per instance basis, using field items
+core: 8.x
+package: Layout
+dependencies:
+  - field
+#  - layout_plugin

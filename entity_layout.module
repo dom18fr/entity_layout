@@ -1,0 +1,128 @@
+<?php
+
+/**
+ * @file
+ * Contains entity_layout.module..
+ */
+
+use Drupal\Component\Plugin\PluginInspectionInterface;
+use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\Entity\EntityViewDisplay;
+use Drupal\Core\Entity\EntityForm;
+use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Field\FieldItemList;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Routing\RouteMatchInterface;
+
+/**
+ * Implements hook_help().
+ * @param $route_name
+ * @param \Drupal\Core\Routing\RouteMatchInterface $route_match
+ * @return string
+ */
+function entity_layout_help($route_name, RouteMatchInterface $route_match) {
+  if ('help.page.entity_layout' === $route_name) {
+    // Main module help for the entity_layout module.
+      $output = '';
+      $output .= '<h3>' . t('About') . '</h3>';
+      $output .= '<p>' . t('Provide ability to contributors to set a custom entity layout x@on a per instance basis, using field items') . '</p>';
+
+      return $output;
+  }
+
+  return null;
+}
+
+/**
+ * Implements hook_field_widget_form_alter().
+ *
+ * @param $element
+ * @param \Drupal\Core\Form\FormStateInterface $form_state
+ * @param $context
+ */
+function _entity_layout_field_widget_form_alter(&$element, FormStateInterface $form_state, $context) {
+  $el_fields = &drupal_static('entity_layout_basic_field_widget', []);
+  $form_id = $form_state->getBuildInfo()['form_id'];
+  /** @var FieldItemList $items */
+  $items = $context['items'];
+  /** @var PluginInspectionInterface $widget */
+  $widget = $context['widget'];
+  if ('entity_layout_basic_field_widget' === $widget->getPluginId()) {
+    $el_fields[$form_id][$items->getName()]['parents']
+      = $element['#field_parents'];
+  }
+}
+
+/**
+ * Implements hook_form_alter().
+ *
+ * @param $form
+ * @param \Drupal\Core\Form\FormStateInterface $form_state
+ * @param $form_id
+ */
+function _entity_layout_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+  /** @noinspection ReferenceMismatchInspection */
+  $el_fields = drupal_static('entity_layout_basic_field_widget', []);
+  if (!array_key_exists($form_id, $el_fields)) {
+
+    return;
+  }
+  $field_element = null;
+  $field_name = null;
+  /** @var array $form_data */
+  $form_data = $el_fields[$form_id];
+  foreach ($form_data as $field_name => $field_data) {
+    $temp = &$form;
+    /** @var array $parents */
+    $parents = $field_data['parents'];
+    foreach ($parents as $parent) {
+      $temp = &$temp[$parent];
+    }
+    $field_element = &$temp[$field_name];
+  }
+  if (null === $field_element) {
+
+    return;
+  }
+  /** @var EntityForm $form_object */
+  $form_object = $form_state->getFormObject();
+  // @todo: better use a service
+  $field_element['entity_layout_component_source'] = _entity_layout_build_component_source(
+    $form_object->getEntity(),
+    $field_name,
+    $form,
+    $form_state
+  );
+}
+
+/**
+ * Helper function to build entity_layout field component source in entity form.
+ *
+ * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+ * @param $field_name
+ * @param \Drupal\Core\Form\FormStateInterface $form_state
+ * @return array
+ */
+function _entity_layout_build_component_source(ContentEntityInterface $entity, $field_name, $form, FormStateInterface $form_state) {
+  /** @var EntityViewDisplay $display */
+  $display = \Drupal::entityTypeManager()
+    ->getStorage('entity_view_display')
+    ->load($entity->getEntityTypeId() . '.' . $entity->bundle() . '.' . 'default');
+  $components = $display->getComponents();
+  $component_list = [
+    '#theme' => 'item_list',
+    '#list_type' => 'ul',
+    '#items' => [],
+  ];
+  $list = &$component_list['#items'];
+  foreach ($components as $name => $component) {
+    if (null !== $entity->getFieldDefinition($name)) {
+      $list[] = [
+        '#markup' => $entity->getFieldDefinition($name)->getLabel(),
+        '#attributes' => [],
+      ];
+    }
+  }
+
+  return $component_list;
+}

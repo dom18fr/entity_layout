@@ -1,0 +1,14 @@
+{
+  "name": "drupal/entity_layout",
+  "type": "drupal-module",
+  "description": "Provide ability to contributors to set a custom entity layouton a per instance basis, using field items",
+  "keywords": ["Drupal"],
+  "license": "GPL-2.0+",
+  "homepage": "https://www.drupal.org/project/entity_layout",
+  "minimum-stability": "dev",
+  "support": {
+    "issues": "https://www.drupal.org/project/issues/entity_layout",
+    "source": "http://cgit.drupalcode.org/entity_layout"
+  },
+  "require": { }
+}
