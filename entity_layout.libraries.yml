@@ -1,0 +1,4 @@
+tabledrag_override:
+  version: VERSION
+  js:
+    js/entity_layout.tabledrag_override.js: {}
