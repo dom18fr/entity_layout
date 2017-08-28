@@ -40,7 +40,8 @@ function entity_layout_help($route_name, RouteMatchInterface $route_match) {
  * @param \Drupal\Core\Form\FormStateInterface $form_state
  * @param $context
  */
-function _entity_layout_field_widget_form_alter(&$element, FormStateInterface $form_state, $context) {
+//function entity_layout_field_widget_form_alter(&$element, FormStateInterface $form_state, $context) {
+function __entity_layout_field_widget_form_alter(&$element, FormStateInterface $form_state, $context) {
   $el_fields = &drupal_static('entity_layout_basic_field_widget', []);
   $form_id = $form_state->getBuildInfo()['form_id'];
   /** @var FieldItemList $items */
@@ -60,7 +61,8 @@ function _entity_layout_field_widget_form_alter(&$element, FormStateInterface $f
  * @param \Drupal\Core\Form\FormStateInterface $form_state
  * @param $form_id
  */
-function _entity_layout_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+//function entity_layout_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+function __entity_layout_form_alter(&$form, FormStateInterface $form_state, $form_id) {
   /** @noinspection ReferenceMismatchInspection */
   $el_fields = drupal_static('entity_layout_basic_field_widget', []);
   if (!array_key_exists($form_id, $el_fields)) {
@@ -84,6 +86,7 @@ function _entity_layout_form_alter(&$form, FormStateInterface $form_state, $form
 
     return;
   }
+  $form['#attached']['library'][] = 'entity_layout/tabledrag_override';
   /** @var EntityForm $form_object */
   $form_object = $form_state->getFormObject();
   // @todo: better use a service

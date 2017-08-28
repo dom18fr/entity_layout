@@ -177,7 +177,7 @@ class TestForm extends FormBase {
       '#value' => 'Go',
     ];
 
-    $form['#attached']['library'][] = 'entity_layout/tabledrag_override';
+//    $form['#attached']['library'][] = 'entity_layout/tabledrag_override';
 
     return $form;
   }

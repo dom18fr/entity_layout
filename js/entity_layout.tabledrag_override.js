@@ -4,7 +4,12 @@
   Drupal.behaviors.blockDrag = {
     attach: function (context, settings) {
       $.each(Drupal.tableDrag, function(id, tableDrag) {
+        var pattern = /entity-layout-.*-tabledrag/g;
+        if (null === tableDrag.$table.attr('id').match(pattern)) {
+          return true;
+        }
         tableDrag.onDrop = function () {
+          console.log('Entity layout item dropped !');
           var $rowElement = $(this.rowObject.element);
           var $table = $rowElement.closest('table');
 

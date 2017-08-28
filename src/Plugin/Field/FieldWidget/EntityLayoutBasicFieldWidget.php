@@ -11,6 +11,7 @@ use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Field\WidgetBase;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Layout\LayoutDefinition;
 use /** @noinspection PhpInternalEntityUsedInspection */
   Drupal\Core\Layout\LayoutPluginManager;
 use Drupal\entity_layout\Plugin\Field\FieldType\EntityLayoutFieldType;
@@ -32,7 +33,6 @@ class EntityLayoutBasicFieldWidget extends WidgetBase {
    * {@inheritdoc}
    */
   public function formElement(FieldItemListInterface $items, $delta, array $element, array &$form, FormStateInterface $form_state) {
-    $form['#attached']['library'][] = 'block/drupal.block';
     // Load Layout manager and retrieve layout_plugins definitions
     /** @var  LayoutPluginManager $layoutsManager */
     $layoutsManager = \Drupal::service('plugin.manager.core.layout');
@@ -59,7 +59,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase {
         $layouts_list[$current_category][$plugin_id] = $label;
       }
     }
-    ksm($layouts_list);
+
     // Get full field definition and field name
     /** @var FieldDefinitionInterface $field_definition */
     $field_definition = $items->getFieldDefinition();
@@ -82,7 +82,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase {
     }
     // Create an id to link layout select with region wrapper.
     // We use Html::getId() instead of Html::getUniqueId() to get it match
-    // between a rebuit select and a not yet rebuilt region wrapper.
+    // between a rebuilt select and a not yet rebuilt region wrapper.
     $regions_wrapper_id = Html::getId(
       implode(
         '-',
@@ -97,7 +97,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase {
       )
     );
     // Create layout select. This is the first column in the field schema.
-    // Regions mapping have to be rebuit when layout changes since each layout
+    // Regions mapping have to be rebuilt when layout changes since each layout
     // has its own regions. So we add #ajax to manage on the fly replacement and
     // a custom #region_wrapper_key to be able to target the right region at
     // replacement time.
@@ -112,74 +112,31 @@ class EntityLayoutBasicFieldWidget extends WidgetBase {
       ],
       '#regions_wrapper_id' => $regions_wrapper_id,
     ];
-    // Initialize regions wrapper, basically a container with the relevant id
-    $element['regions'] = [
-      '#type' => 'table',
-      '#tree' => true,
-      '#prefix' => '<div id="' . $regions_wrapper_id . '">',
-      '#suffix' => '</div>'
-    ];
-    // @todo: remove it, just for test
-    $element['add_content'] = [
-      '#type' => 'button',
-      '#value' => 'add',
-      '#ajax' => [
-        'event' => 'click',
-        'callback' => [$this, 'layoutSelectChangeAjaxCallback'],
-      ],
-      '#regions_wrapper_id' => $regions_wrapper_id,
-      '#name' => 'add_content_' . $delta,
-    ];
-    if (
-        null !== $form_state->getTriggeringElement()
-        && 'add_content' === end($form_state->getTriggeringElement()['#array_parents'])
-    ) {
-      $id = Html::getUniqueId('yolo');
-      $regions[$id] = [
-          'id' => $id,
-          'delta' => -1,
-          'region' => 'left',
-          'weight' => 0,
-      ];
-    }
-    $this->buildRegions($element, $layout_plugins, $layout_id, $regions);
 
-    // @todo: remove it
-    $element = [
-      '#markup' => '<div>yolo</div>',
-    ];
+    $this->buildRegionsTable($element, $layout_plugins, $layout_id, $regions);
+    $element['#attached']['library'][] = 'entity_layout/tabledrag_override';
 
     return $element;
   }
 
-  protected function buildRegions(&$element, $layout_plugins, $layout_id, $item_values_regions) {
-    // @todo: manage content assignment replacement when switching layout
-    if (null === $layout_id) {
-
-      return;
-    }
-    $regions = &$element['regions'];
-    $regions['#header'] = [
-      $this->t('Label'),
-      $this->t('Content ID'),
-      $this->t('Delta'),
-      $this->t('Regions'),
-      $this->t('Weight'),
-      $this->t('Operations'),
+  protected function buildRegionsTable(array &$element, array $layout_plugins, $layout_id, array $item_values_regions) {
+    // Initialize regions wrapper, basically a container with the relevant id
+    $regions_wrapper_id = $element['layout']['#regions_wrapper_id'];
+    $regions_table_id = str_replace('-wpr', '-tabledrag', $regions_wrapper_id);
+    $element['regions'] = [
+      '#type' => 'table',
+      '#empty' => t('No regions available'),
+      '#attributes' => [
+        'id' => $regions_table_id,
+      ],
+      '#prefix' => '<div id="' . $regions_wrapper_id . '">',
+      '#suffix' => '</div>'
     ];
-    // This id value is needed in order to get drupal.blocks working.
-    // @todo: find a way to cleanly override it, each field item would have
-    // the same id, it can't work this way.
-    $regions['#attributes']['id'] = 'blocks';
-    /** @var EntityLayoutFieldType $item */
-
-    $regions = $layout_plugins[$layout_id]->getRegions();
-    /** @var  array $regions */
-    // @todo: replace "content" wording with "component", used in EntityViewDisplay
-    $content_assignement = [];
-    foreach ($regions as $id => $data) {
-      $content_assignement[$id] = [];
+    if (false === array_key_exists($layout_id, $layout_plugins)) {
+      return null;
     }
+
+    $content_assignment = [];
     /** @var array $item_values_regions */
     foreach ($item_values_regions as $id => $values) {
       if (
@@ -187,113 +144,123 @@ class EntityLayoutBasicFieldWidget extends WidgetBase {
         && array_key_exists('region', $values)
         && array_key_exists('weight', $values)
       ) {
-        $content_assignement[$values['region']][$values['id']] = [
-          'label' => array_key_exists('label', $values) ? $values['label'] : $values['id'],
+        $content_assignment[$values['region']][$values['id']] = [
           'id' => $values['id'],
           'delta' => array_key_exists('delta', $values) ? $values['delta'] : -1,
-          'region' => $values['region'],
+          'label' => array_key_exists('label', $values) ? $values['label'] : $values['id'],
+          'parent' => $values['region'],
           'weight' => $values['weight'],
         ];
       }
     }
-    // Loop through the blocks per region.
-    foreach ($content_assignement as $region => $contents) {
-      // Add a section for each region and allow blocks to be dragged between
-      // them.
-      $region_name = $regions[$region]['label'];
-      $regions['#tabledrag'][] = [
-        'action' => 'match',
-        'relationship' => 'sibling',
-        'group' => 'block-region-select',
-        'subgroup' => 'block-region-' . $region,
-        'hidden' => FALSE,
-      ];
-      $regions['#tabledrag'][] = [
+
+    /**
+     * MOCK
+     */
+//    if ('layout_twocol' === $layout_id) {
+//      $content_assignment['bottom']['field_yololo_2'] = [
+//        'id' => 'field_yololo',
+//        'delta' => 2,
+//        'label' => 'field_yololo:2',
+//        'region' => 'layout_twocol',
+//        'weight' => 0,
+//      ];
+//    }
+    /**
+     * ENDMOCK
+     */
+
+    $regions_table = &$element['regions'];
+    $regions_table['#header'] = [
+      [
+        'data' => t('Label'),
+        'colspan' => 4,
+      ],
+      t('Weight'),
+    ];
+    /** @var LayoutDefinition $layout */
+    $layout = $layout_plugins[$layout_id];
+    foreach($layout->getRegions() as $region_id => $region) {
+      if (false === array_key_exists($region_id, $content_assignment)) {
+        $content_assignment[$region_id] = [];
+      }
+      $regions_table['#tabledrag'][] = [
         'action' => 'order',
         'relationship' => 'sibling',
-        'group' => 'block-weight',
-        'subgroup' => 'block-weight-' . $region,
+        'group' => 'item-weight',
+        'subgroup' => 'item-weight-' . $region_id,
       ];
-      $regions['region-' . $region] = [
-        '#attributes' => [
-          'class' => ['region-title', 'region-title-' . $region],
-          'no_striping' => TRUE,
-        ],
-      ];
-      $regions['region-' . $region]['title'] = [
-        '#markup' => $region_name,
+
+      $region_row['#attributes']['data-region-id'] = $region_id;
+
+      $region_row['label'] = [
+        '#plain_text' => $region['label'],
         '#wrapper_attributes' => [
-          'colspan' => 6,
-        ],
+          'colspan' => 4
+        ]
       ];
-      $regions['region-' . $region . '-message'] = [
+
+      $region_row['id'] = [
+        '#type' => 'hidden',
+        '#value' => $region_id,
         '#attributes' => [
           'class' => [
-            'region-message',
-            'region-' . $region . '-message',
-            (0 === count($contents)) ? 'region-empty' : 'region-populated',
+            'region-id-' . $region_id
           ],
         ],
       ];
-      $regions['region-' . $region . '-message']['message'] = [
-        '#markup' => '<em>' . $this->t('No contents in this region') . '</em>',
-        '#wrapper_attributes' => [
-          'colspan' => 6,
+
+      $regions_table[$region_id] = $region_row;
+      $this->buildItemRows($regions_table, $region_id, $region, $content_assignment[$region_id]);
+    }
+  }
+
+  protected function buildItemRows (array &$regions_table, $region_id, array $region, array $region_content) {
+
+    /** @var array $contents */
+    foreach ($region_content as $content_id => $content) {
+      $content_row = [
+        '#attributes' => [
+          'class' => [
+            'draggable',
+            'tabledrag-leaf'
+          ],
+        ],
+      ];
+      $content_row['label'] = [
+        '#markup' => $content['label'], // Label should be calculated id + delta, or title / preview
+      ];
+      $content_row['id'] = [
+        '#type' => 'hidden',
+        '#value' => $content_id,
+      ];
+      $content_row['delta'] = [
+        '#type' => 'hidden',
+        '#value' => $content['delta'],
+      ];
+      $content_row['region'] = [
+        '#type' => 'hidden',
+        '#value' => $region_id,
+        '#attributes' => [
+          'data-region-id-input' => true,
         ],
       ];
 
-      /** @var array $contents */
-      foreach ($contents as $content_id => $content) {
-        $row = [
-          '#attributes' => [
-            'class' => ['draggable'],
-          ],
-        ];
-        $row['label']['#markup'] = $content['label']; // Label should be calculated
-        $row['id'] = [
-          '#type' => 'hidden',
-          '#value' => $content_id,
-          '#suffix' => $content_id,
-        ];
-        $row['delta'] = [
-          '#type' => 'hidden',
-          '#value' => $content['delta'],
-          '#suffix' => $content['delta'],
-        ];
-        // Allow the region to be changed for each block.
-        $row['region'] = [
-          '#title' => $this->t('Region'),
-          '#title_display' => 'invisible',
-          '#type' => 'select',
-          '#options' => $region_names,
-          '#default_value' => $region,
-          '#attributes' => [
-            'class' => ['block-region-select', 'block-region-' . $region],
-          ],
-        ];
-        // Allow the weight to be changed for each block.
-        $row['weight'] = [
-          '#type' => 'weight',
-          '#default_value' => $content['weight'],
-          '#title' => $this->t(
-            'Weight for @block block',
-            ['@block' => $region_name]
-          ),
-          '#title_display' => 'invisible',
-          '#attributes' => [
-            'class' => ['block-weight', 'block-weight-' . $region],
-          ],
-        ];
-        // Add the operation links.
-        $operations = [];
+      $content_row['weight'] = [
+        '#type' => 'weight',
+        '#title' => t('Weight for @title', array('@title' => $content['label'])),
+        '#title_display' => 'invisible',
+        '#default_value' => $content['weight'],
+        '#delta' => 20,
+        '#attributes' => [
+          'class' => [
+            'item-weight',
+            'item-weight-' . $region_id,
+          ]
+        ],
+      ];
 
-        $row['operations'] = [
-          '#type' => 'operations',
-          '#links' => $operations,
-        ];
-
-        $regions[$content_id] = $row;
-      }
+      $regions_table[$content_id] = $content_row;
     }
   }
 
