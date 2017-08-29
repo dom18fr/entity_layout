@@ -2,6 +2,8 @@
 
 namespace Drupal\entity_layout\Plugin\Field\FieldWidget;
 
+use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 use Drupal\Component\Utility\Html;
 use Drupal\Console\Core\Utils\NestedArray;
 use Drupal\Core\Ajax\AjaxResponse;
@@ -12,12 +14,11 @@ use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Field\WidgetBase;
 use Drupal\Core\Form\FormStateInterface;
+
 use /** @noinspection PhpInternalEntityUsedInspection */
   Drupal\Core\Layout\LayoutDefinition;
 use /** @noinspection PhpInternalEntityUsedInspection */
   Drupal\Core\Layout\LayoutPluginManagerInterface;
-use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
-use Symfony\Component\DependencyInjection\ContainerInterface;
 
 /**
  * Plugin implementation of the 'entity_layout_basic_field_widget' widget.
@@ -70,7 +71,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * @param array $third_party_settings
    * @param LayoutPluginManagerInterface $layoutPluginsManager
    */
-  public function __construct($plugin_id, $plugin_definition, FieldDefinitionInterface $field_definition, array $settings, array $third_party_settings, LayoutPluginManagerInterface $layoutPluginsManager) {
+  public function __construct($plugin_id, $plugin_definition, FieldDefinitionInterface $field_definition, array $settings, array $third_party_settings, /** @noinspection PhpInternalEntityUsedInspection */ LayoutPluginManagerInterface $layoutPluginsManager) {
     parent::__construct($plugin_id, $plugin_definition, $field_definition, $settings, $third_party_settings);
     $this->layoutPlugins = $layoutPluginsManager->getDefinitions();
   }
@@ -104,7 +105,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     // Create layout select. This is the first column in the field schema.
     // Regions mapping have to be rebuilt when layout changes since each layout
     // has its own regions. So we add #ajax to manage on the fly replacement and
-    // a custom #region_wrapper_key to be able to target the right region at
+    // a custom #regions_wrapper_key to be able to target the right region at
     // replacement time.
     $element['layout'] = [
       '#type' => 'select',
@@ -116,6 +117,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         'callback' => [$this, 'layoutSelectChangeAjaxCallback'],
       ],
       '#regions_wrapper_id' => $regions_wrapper_id,
+      '#change_layout' => true,
     ];
     // Create regions and items tabledrag
     if (false === array_key_exists($layout_id, $this->layoutPlugins)) {
@@ -179,13 +181,104 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     } else {
       $item = $items[$delta];
       $layout_id = isset($item->layout) ? $item->layout : null;
-      // @todo: here, get able to grab new item assignment from ajax
       $regions = isset($item->regions) && '' !== $item->regions ? $item->regions : [];
     }
-    
+    // Add item from ajax request in region if needed
+    $this->buildAjaxAddedItem($regions, $items, $delta, $form_state);
+
     return [$layout_id, $regions];
   }
 
+  /**
+   * @param $regions
+   * @param \Drupal\Core\Field\FieldItemListInterface $items
+   * @param $delta
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *
+   * @return null
+   */
+  protected function buildAjaxAddedItem(&$regions, FieldItemListInterface $items, $delta, FormStateInterface $form_state) {
+    /** @noinspection ReferenceMismatchInspection */
+    $trigger = $form_state->getTriggeringElement();
+    if (
+      null === $trigger
+      || false === array_key_exists('#add_item', $trigger)
+      || true !== $trigger['#add_item']
+    ) {
+
+      return null;
+    }
+    $item_details = $this->getAddedItemDetails(
+      $trigger,
+      $items,
+      $delta,
+      $form_state
+    );
+    $region_id = $trigger['#region_id'];
+    $region_index = array_search($region_id, array_keys($regions), true) + 1;
+    $added_item = [
+      'id' => $item_details['id'],
+      'delta' => $item_details['delta'],
+      'weight' => 0,
+      'region' => $region_id,
+    ];
+    $regions = array_slice($regions, 0, $region_index, true) +
+    array($item_details['id'] => $added_item) +
+    array_slice($regions, $region_index, count($regions) - 1, true) ;
+  }
+
+  /**
+   * @param array $trigger
+   * @param \Drupal\Core\Field\FieldItemListInterface $items
+   * @param $delta
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *
+   * @return array
+   */
+  protected function getAddedItemDetails(array $trigger, FieldItemListInterface $items, $delta, FormStateInterface $form_state) {
+    $regions_wrapper_state_index = array_search(
+      'regions',
+      $trigger['#parents'],
+      true
+    );
+    $regions_wrapper_state_path = array_splice(
+      $trigger['#parents'],
+      0,
+      $regions_wrapper_state_index
+    );
+    $addable_items_state_path = $regions_wrapper_state_path;
+    $addable_items_state_path[] = 'addable_items';
+    /** @noinspection ReferenceMismatchInspection */
+    $addable_item_id = NestedArray::getValue(
+      $form_state->getValues(),
+      $addable_items_state_path
+    );
+    $regions_wrapper_form_index = array_search(
+      'regions',
+      $trigger['#array_parents'],
+      true
+    );
+    $regions_wrapper_form_path = array_splice(
+      $trigger['#array_parents'],
+      0,
+      $regions_wrapper_form_index
+    );
+    $added_item_form_path = $regions_wrapper_form_path;
+    $added_item_form_path[] = 'addable_items';
+    $added_item_form_path[] = '#options_details';
+    $added_item_form_path[] = $addable_item_id;
+    /** @noinspection ReferenceMismatchInspection */
+    $added_item_details = NestedArray::getValue(
+      $form_state->getCompleteForm(),
+      $added_item_form_path
+    );
+
+    return $added_item_details;
+  }
+
+  /**
+   * @return array
+   */
   protected function getCategorizedLayoutList() {
     // Build Layouts list to be render as grouped select options
     $layout_list = [];
@@ -284,6 +377,9 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         '#type' => 'button',
         '#value' => 'go',
         '#name' => 'add-item-' . $regions_wrapper_id . '-' . $region_id,
+        '#add_item' => true,
+        '#regions_wrapper_id' => $regions_wrapper_id,
+        '#region_id' => $region_id,
         '#ajax' => [
           'event' => 'click',
           'callback' => [$this, 'itemAddAjaxCallback']
@@ -315,6 +411,12 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     return $regions_table;
   }
 
+  /**
+   * @param array $regions_table
+   * @param $region_id
+   * @param array $region
+   * @param array $region_content
+   */
   protected function buildItemRows (array &$regions_table, $region_id, array $region, array $region_content) {
     foreach ($region_content as $item_id => $item) {
       $item_row = [
@@ -367,6 +469,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    *
    * @param array $form
    * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *
    * @return \Drupal\Core\Ajax\AjaxResponse
    */
   public function layoutSelectChangeAjaxCallback(array &$form, FormStateInterface $form_state) {
@@ -386,128 +489,37 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     return $response;
   }
 
+  /**
+   * @param array $form
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   *
+   * @return \Drupal\Core\Ajax\AjaxResponse
+   */
   public function itemAddAjaxCallback(array &$form, FormStateInterface $form_state) {
-    // @todo: cleanup this fucking mess (do it in ::getElementValues())
-    /** @var array $trigger_parents */
-    $trigger_parents = $form_state->getTriggeringElement()['#parents'];
-    $item_state_parents = [];
-    foreach ($trigger_parents as $parent) {
-      if ('regions' === $parent) {
-
-        $item_state_parents[] = 'addable_items';
-        break;
-      }
-      $item_state_parents[] = $parent;
-    }
+    $response = new AjaxResponse();
     /** @noinspection ReferenceMismatchInspection */
-    $item_id = NestedArray::getValue(
-      $form_state->getValues(),
-      $item_state_parents
+    $trigger = $form_state->getTriggeringElement();
+    if (false === array_key_exists('#regions_wrapper_id', $trigger)) {
+
+      return $response;
+    }
+    $regions_wrapper_form_index = array_search(
+      'regions',
+      $trigger['#array_parents'],
+      true
     );
-    if (null === $item_id) {
-
-      return null;
-    }
-    /** @var array $trigger_form_parents */
-    $trigger_form_parents = $form_state->getTriggeringElement()['#array_parents'];
-    $details_parents = [];
-    $region_id_parents = [];
-    $region_found = false;
-    $is_region_id = false;
-    $region_parents = [];
-    foreach ($trigger_form_parents as $parent) {
-      if ('regions' === $parent) {
-        $region_found = true;
-        $region_parents = $details_parents;
-        $region_parents[] = $parent;
-
-        $details_parents[] = 'addable_items';
-        $details_parents[] = '#options_details';
-        $details_parents[] = $item_id;
-      }
-      $region_id_parents[] = $parent;
-      if (true === $is_region_id) {
-        $region_id_parents[] = 'id';
-        $region_id_parents[] = '#value';
-        break;
-      }
-      if (false === $region_found) {
-        $details_parents[] = $parent;
-      } else {
-        $is_region_id = true;
-      }
-    }
-    /** @noinspection ReferenceMismatchInspection */
-    $item_details = NestedArray::getValue(
-      $form,
-      $details_parents
+    $regions_wrapper_form_path = array_splice(
+      $trigger['#array_parents'],
+      0,
+      $regions_wrapper_form_index
     );
-    if (null === $item_details) {
-
-      return null;
-    }
-    /** @noinspection ReferenceMismatchInspection */
-    $region_id = NestedArray::getValue(
-      $form,
-      $region_id_parents
-    );
-    if (null === $region_id) {
-
-      return null;
-    }
+    $regions_wrapper_form_path[] = 'regions';
     /** @noinspection ReferenceMismatchInspection */
     $regions = NestedArray::getValue(
-      $form,
-      $region_parents
+      $form_state->getCompleteForm(),
+      $regions_wrapper_form_path
     );
-
-    $content_row = [
-      '#attributes' => [
-        'class' => [
-          'draggable',
-          'tabledrag-leaf'
-        ],
-      ],
-    ];
-    $content_row['label'] = [
-      '#markup' => $item_details['id'] . ':' . $item_details['delta'],
-    ];
-    $content_row['id'] = [
-      '#type' => 'hidden',
-      '#value' => $item_details['id'],
-    ];
-    $content_row['delta'] = [
-      '#type' => 'hidden',
-      '#value' => $item_details['delta'],
-    ];
-    $content_row['region'] = [
-      '#type' => 'hidden',
-      '#value' => $region_id,
-      '#attributes' => [
-        'data-region-id-input' => true,
-      ],
-    ];
-
-    $content_row['weight'] = [
-      '#type' => 'weight',
-      '#title' => t('Weight for @title', array('@title' => $content_row['label']['#markup'])),
-      '#title_display' => 'invisible',
-      '#default_value' => 0,
-      '#delta' => 20,
-      '#attributes' => [
-        'class' => [
-          'item-weight',
-          'item-weight-' . $region_id,
-        ]
-      ],
-    ];
-
-    $regions[$item_details['id']] = $content_row;
-    $replace = new ReplaceCommand('#' . $regions['#regions_wrapper_id'], $regions);
-//    $res = array_slice($array, 0, 3, true) +
-//      array("my_key" => "my_value") +
-//      array_slice($array, 3, count($array) - 1, true) ;
-    $response = new AjaxResponse();
+    $replace = new ReplaceCommand('#' . $trigger['#regions_wrapper_id'], $regions);
     $response->addCommand($replace);
 
     return $response;
