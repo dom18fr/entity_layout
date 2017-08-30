@@ -2,6 +2,11 @@
 
 namespace Drupal\entity_layout\Plugin\Field\FieldWidget;
 
+use Drupal\Component\Plugin\Exception\InvalidPluginDefinitionException;
+use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\Entity\EntityViewDisplay;
+use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Drupal\Component\Utility\Html;
@@ -19,6 +24,8 @@ use /** @noinspection PhpInternalEntityUsedInspection */
   Drupal\Core\Layout\LayoutDefinition;
 use /** @noinspection PhpInternalEntityUsedInspection */
   Drupal\Core\Layout\LayoutPluginManagerInterface;
+use Symfony\Component\DependencyInjection\Exception\ServiceCircularReferenceException;
+use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;
 
 /**
  * Plugin implementation of the 'entity_layout_basic_field_widget' widget.
@@ -36,20 +43,25 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   /** @var array $layoutPlugins  */
   protected $layoutPlugins;
 
+  /** @var EntityTypeManagerInterface $entityTypeManager */
+  protected $entityTypeManager;
+
   /**
-   * @param \Symfony\Component\DependencyInjection\ContainerInterface $container
+   * @param ContainerInterface $container
    * @param array $configuration
    * @param string $plugin_id
    * @param mixed $plugin_definition
    *
-   * @throws \Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException
-   * @throws \Symfony\Component\DependencyInjection\Exception\ServiceCircularReferenceException
+   * @throws ServiceNotFoundException
+   * @throws ServiceCircularReferenceException
    *
    * @return static
    */
   public static function create(ContainerInterface $container, array $configuration, $plugin_id, $plugin_definition) {
-    /** @var LayoutPluginManagerInterface $LayoutPluginManager */
-    $LayoutPluginManager = $container->get('plugin.manager.core.layout');
+    /** @var LayoutPluginManagerInterface $layout_plugin_manager */
+    $layout_plugin_manager = $container->get('plugin.manager.core.layout');
+    /** @var EntityTypeManagerInterface $entity_type_manager */
+    $entity_type_manager = $container->get('entity_type.manager');
 
     return new static(
       $plugin_id,
@@ -57,7 +69,8 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $configuration['field_definition'],
       $configuration['settings'],
       $configuration['third_party_settings'],
-      $LayoutPluginManager
+      $layout_plugin_manager,
+      $entity_type_manager
     );
   }
 
@@ -70,14 +83,23 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * @param array $settings
    * @param array $third_party_settings
    * @param LayoutPluginManagerInterface $layoutPluginsManager
+   * @param EntityTypeManagerInterface $entity_type_manager
    */
-  public function __construct($plugin_id, $plugin_definition, FieldDefinitionInterface $field_definition, array $settings, array $third_party_settings, /** @noinspection PhpInternalEntityUsedInspection */ LayoutPluginManagerInterface $layoutPluginsManager) {
-    parent::__construct($plugin_id, $plugin_definition, $field_definition, $settings, $third_party_settings);
+  public function __construct($plugin_id, $plugin_definition, FieldDefinitionInterface $field_definition, array $settings, array $third_party_settings, /** @noinspection PhpInternalEntityUsedInspection */ LayoutPluginManagerInterface $layoutPluginsManager, EntityTypeManagerInterface $entity_type_manager) {
+    parent::__construct(
+      $plugin_id,
+      $plugin_definition,
+      $field_definition,
+      $settings,
+      $third_party_settings
+    );
     $this->layoutPlugins = $layoutPluginsManager->getDefinitions();
+    $this->entityTypeManager = $entity_type_manager;
   }
 
   /**
    * {@inheritdoc}
+   * @throws \Drupal\Component\Plugin\Exception\InvalidPluginDefinitionException
    */
   public function formElement(FieldItemListInterface $items, $delta, array $element, array &$form, FormStateInterface $form_state) {
     // Get full field definition and field name
@@ -129,30 +151,74 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $regions,
       $regions_wrapper_id
     );
-
+    /** @var FieldableEntityInterface $entity */
+    $entity = $items->getEntity();
+    $element['addable_items'] = $this->getAddableItemsElement($entity);
     // @todo: temporary
-    $element['addable_items'] = [
-      '#type' => 'radios',
-      '#options' => [
-        'test' => 'test',
-        'test2' => 'test2',
-      ],
-      '#name' => 'addable-items-' . $regions_wrapper_id,
-      '#id' => 'addable-items-' . $regions_wrapper_id,
-      '#options_details' => [
-        'test' => [
-          'id' => 'field_test',
-          'delta' => -1
-        ],
-        'test2' => [
-          'id' => 'field_test2',
-          'delta' => 2,
-        ],
-      ],
-    ];
-    // @todo: end temporary
+//    $element['addable_items'] = [
+//      '#type' => 'radios',
+//      '#options' => [
+//        'test' => 'test',
+//        'test2' => 'test2',
+//      ],
+//      '#name' => 'addable-items-' . $regions_wrapper_id,
+//      '#id' => 'addable-items-' . $regions_wrapper_id,
+//      '#options_details' => [
+//        'test' => [
+//          'id' => 'field_test',
+//          'delta' => -1
+//        ],
+//        'test2' => [
+//          'id' => 'field_test2',
+//          'delta' => 2,
+//        ],
+//      ],
+//    ];
+//    // @todo: end temporary
 
     return $element;
+  }
+
+  /**
+   * @param FieldableEntityInterface $entity
+   *
+   * @throws InvalidPluginDefinitionException
+   *
+   * @return array
+   */
+  protected function getAddableItemsElement(FieldableEntityInterface $entity) {
+    // @todo: does the default view_mode actually return all components ?
+    $view_mode = implode(
+      '.',
+      [
+        $entity->getEntityTypeId(),
+        $entity->bundle(),
+        'default'
+      ]
+    );
+    /** @var EntityViewDisplay $display */
+    $display = \Drupal::entityTypeManager()
+      ->getStorage('entity_view_display')
+      ->load($view_mode);
+    $components = $display->getComponents();
+    $component_list = [
+      '#theme' => 'item_list',
+      '#list_type' => 'ul',
+      '#items' => [],
+    ];
+    $list = &$component_list['#items'];
+    foreach ($components as $name => $component) {
+      // @todo: exclude entity_layout field items ...
+      // @todo: build proper checkboxes
+      if (null !== $entity->getFieldDefinition($name)) {
+        $list[] = [
+          '#markup' => $entity->getFieldDefinition($name)->getLabel(),
+          '#attributes' => [],
+        ];
+      }
+    }
+
+    return $component_list;
   }
 
   /**
@@ -215,6 +281,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $form_state
     );
     $region_id = $trigger['#region_id'];
+    /** @noinspection ReferenceMismatchInspection */
     $region_index = array_search($region_id, array_keys($regions), true) + 1;
     $added_item = [
       'id' => $item_details['id'],
@@ -222,6 +289,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       'weight' => 0,
       'region' => $region_id,
     ];
+    /** @noinspection ReferenceMismatchInspection */
     $regions = array_slice($regions, 0, $region_index, true) +
     array($item_details['id'] => $added_item) +
     array_slice($regions, $region_index, count($regions) - 1, true) ;
@@ -342,16 +410,19 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         && array_key_exists('region', $values)
         && array_key_exists('weight', $values)
       ) {
+        $delta = array_key_exists('delta', $values) ? $values['delta'] : -1;
+        $label = array_key_exists('label', $values) ?
+          $values['label'] :
+          $values['id'];
         $content_assignment[$values['region']][$values['id']] = [
           'id' => $values['id'],
-          'delta' => array_key_exists('delta', $values) ? $values['delta'] : -1,
-          'label' => array_key_exists('label', $values) ? $values['label'] : $values['id'],
+          'delta' => $delta,
+          'label' => $label,
           'parent' => $values['region'],
           'weight' => $values['weight'],
         ];
       }
     }
-
     // Iterate over regions and build each table row accordingly
     foreach($layout->getRegions() as $region_id => $region) {
       if (false === array_key_exists($region_id, $content_assignment)) {
@@ -519,7 +590,10 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $form_state->getCompleteForm(),
       $regions_wrapper_form_path
     );
-    $replace = new ReplaceCommand('#' . $trigger['#regions_wrapper_id'], $regions);
+    $replace = new ReplaceCommand(
+      '#' . $trigger['#regions_wrapper_id'],
+      $regions
+    );
     $response->addCommand($replace);
 
     return $response;
