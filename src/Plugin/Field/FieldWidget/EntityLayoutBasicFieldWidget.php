@@ -3,8 +3,7 @@
 namespace Drupal\entity_layout\Plugin\Field\FieldWidget;
 
 use Drupal\Component\Plugin\Exception\InvalidPluginDefinitionException;
-use Drupal\Core\Entity\ContentEntityInterface;
-use Drupal\Core\Entity\Entity\EntityViewDisplay;
+use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
@@ -24,6 +23,7 @@ use /** @noinspection PhpInternalEntityUsedInspection */
   Drupal\Core\Layout\LayoutDefinition;
 use /** @noinspection PhpInternalEntityUsedInspection */
   Drupal\Core\Layout\LayoutPluginManagerInterface;
+
 use Symfony\Component\DependencyInjection\Exception\ServiceCircularReferenceException;
 use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;
 
@@ -46,6 +46,9 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   /** @var EntityTypeManagerInterface $entityTypeManager */
   protected $entityTypeManager;
 
+  /** @var  EntityFieldManagerInterface $entityFieldManager */
+  protected $entityFieldManager;
+
   /**
    * @param ContainerInterface $container
    * @param array $configuration
@@ -62,6 +65,8 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $layout_plugin_manager = $container->get('plugin.manager.core.layout');
     /** @var EntityTypeManagerInterface $entity_type_manager */
     $entity_type_manager = $container->get('entity_type.manager');
+    /** @var EntityFieldManagerInterface $entity_field_manager */
+    $entity_field_manager = $container->get('entity_field.manager');
 
     return new static(
       $plugin_id,
@@ -70,7 +75,8 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $configuration['settings'],
       $configuration['third_party_settings'],
       $layout_plugin_manager,
-      $entity_type_manager
+      $entity_type_manager,
+      $entity_field_manager
     );
   }
 
@@ -82,10 +88,12 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * @param FieldDefinitionInterface $field_definition
    * @param array $settings
    * @param array $third_party_settings
-   * @param LayoutPluginManagerInterface $layoutPluginsManager
+   * @param LayoutPluginManagerInterface $layout_plugins_manager
    * @param EntityTypeManagerInterface $entity_type_manager
+   * @param EntityFieldManagerInterface $entity_field_manager
+   * @internal param \Drupal\Core\Layout\LayoutPluginManagerInterface $layout_plugins_manager
    */
-  public function __construct($plugin_id, $plugin_definition, FieldDefinitionInterface $field_definition, array $settings, array $third_party_settings, /** @noinspection PhpInternalEntityUsedInspection */ LayoutPluginManagerInterface $layoutPluginsManager, EntityTypeManagerInterface $entity_type_manager) {
+  public function __construct($plugin_id, $plugin_definition, FieldDefinitionInterface $field_definition, array $settings, array $third_party_settings, /** @noinspection PhpInternalEntityUsedInspection */ LayoutPluginManagerInterface $layout_plugins_manager, EntityTypeManagerInterface $entity_type_manager, EntityFieldManagerInterface $entity_field_manager) {
     parent::__construct(
       $plugin_id,
       $plugin_definition,
@@ -93,13 +101,16 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $settings,
       $third_party_settings
     );
-    $this->layoutPlugins = $layoutPluginsManager->getDefinitions();
+    $this->layoutPlugins = $layout_plugins_manager->getDefinitions();
     $this->entityTypeManager = $entity_type_manager;
+    $this->entityFieldManager = $entity_field_manager;
   }
 
   /**
    * {@inheritdoc}
    * @throws \Drupal\Component\Plugin\Exception\InvalidPluginDefinitionException
+   * @throws \LogicException
+   * @throws \InvalidArgumentException
    */
   public function formElement(FieldItemListInterface $items, $delta, array $element, array &$form, FormStateInterface $form_state) {
     // Get full field definition and field name
@@ -107,7 +118,12 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $field_definition = $items->getFieldDefinition();
     $field_name = $field_definition->getName();
     // Get current layout id and regions state
-    list($layout_id, $regions) = $this->getElementValues($field_name, $items, $delta, $form_state);
+    list($layout_id, $regions) = $this->getElementValues(
+      $field_name,
+      $items,
+      $delta,
+      $form_state
+    );
     // Create an id to link layout select with region wrapper.
     // We use Html::getId() instead of Html::getUniqueId() to get it match
     // between a rebuilt select and a not yet rebuilt region wrapper.
@@ -124,6 +140,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         ]
       )
     );
+    $form['#after_build'][] = [$this, 'formElementAfterBuildCallback'];
     // Create layout select. This is the first column in the field schema.
     // Regions mapping have to be rebuilt when layout changes since each layout
     // has its own regions. So we add #ajax to manage on the fly replacement and
@@ -136,99 +153,202 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       '#empty_option' => '-- ' . $this->t('Choose a layout') . ' --',
       '#ajax' => [
         'event' => 'change',
-        'callback' => [$this, 'layoutSelectChangeAjaxCallback'],
+        'callback' => [$this, 'regionsReplaceAjaxCallback'],
       ],
       '#regions_wrapper_id' => $regions_wrapper_id,
-      '#change_layout' => true,
+      '#action' => 'change_layout'
     ];
     // Create regions and items tabledrag
     if (false === array_key_exists($layout_id, $this->layoutPlugins)) {
-
+      // If no layout is selected, just render a placeholder where regions
+      // will be rendered at ajax replacement time
+      $element['regions'] = [
+        '#markup' => '<div id="' . $regions_wrapper_id . '"></div>'
+      ];
+      // @todo: create a same placeholder for addable items list and manage ajax replacement of it
       return $element;
     }
-    $element['regions'] = $this->regionsTableElement(
+    $element['regions'] = $this->getRegionsTableElement(
       $this->layoutPlugins[$layout_id],
       $regions,
       $regions_wrapper_id
     );
-    /** @var FieldableEntityInterface $entity */
-    $entity = $items->getEntity();
-    $element['addable_items'] = $this->getAddableItemsElement($entity);
-    // @todo: temporary
-//    $element['addable_items'] = [
-//      '#type' => 'radios',
-//      '#options' => [
-//        'test' => 'test',
-//        'test2' => 'test2',
-//      ],
-//      '#name' => 'addable-items-' . $regions_wrapper_id,
-//      '#id' => 'addable-items-' . $regions_wrapper_id,
-//      '#options_details' => [
-//        'test' => [
-//          'id' => 'field_test',
-//          'delta' => -1
-//        ],
-//        'test2' => [
-//          'id' => 'field_test2',
-//          'delta' => 2,
-//        ],
-//      ],
-//    ];
-//    // @todo: end temporary
-
+    $element['addable_items'] = $this->getAddableItemsElement(
+      $items,
+      $delta,
+      $form_state,
+      $regions_wrapper_id
+    );
+    // @todo: alter addable_items based on form_state in case of ajax rebuilding
     return $element;
   }
 
   /**
-   * @param FieldableEntityInterface $entity
+   * After build callback for entity form. Used to add a validate handler at
+   * the very end of the list
    *
-   * @throws InvalidPluginDefinitionException
+   * @param $form
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   * @return mixed
+   */
+  public function formElementAfterBuildCallback($form, FormStateInterface $form_state) {
+    $form['#validate']['entity_layout_basic_widget_validator'] = [
+      get_class($this),
+      'addItemValidateCallback',
+    ];
+
+    return $form;
+  }
+
+  /**
+   * Validate handler for entity form, called after any other it ensure
+   * no data validation problem could prevent added item ajax processing.
+   *
+   * @param $form
+   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   */
+  public static function addItemValidateCallback(&$form, FormStateInterface $form_state) {
+    /** @noinspection ReferenceMismatchInspection */
+    $trigger = $form_state->getTriggeringElement();
+    if (
+      false === array_key_exists('#action', $trigger)
+      || 'add_item' !== $trigger['#action']
+    ) {
+      return;
+    }
+    $form_state->clearErrors();
+  }
+
+  /**
+   * @param FieldItemListInterface $items
+   * @param $delta
+   * @param FormStateInterface $form_state
+   * @param $regions_wrapper_id
+   *
+   * @throws \LogicException
    *
    * @return array
    */
-  protected function getAddableItemsElement(FieldableEntityInterface $entity) {
-    // @todo: does the default view_mode actually return all components ?
-    $view_mode = implode(
-      '.',
-      [
-        $entity->getEntityTypeId(),
-        $entity->bundle(),
-        'default'
-      ]
-    );
-    /** @var EntityViewDisplay $display */
-    $display = \Drupal::entityTypeManager()
-      ->getStorage('entity_view_display')
-      ->load($view_mode);
-    $components = $display->getComponents();
+  protected function getAddableItemsElement(FieldItemListInterface $items, $delta, FormStateInterface $form_state, $regions_wrapper_id) {
+    /** @var FieldableEntityInterface $entity */
+    $entity = $items->getEntity();
+    $components = $this->getRootComponents($entity);
     $component_list = [
-      '#theme' => 'item_list',
-      '#list_type' => 'ul',
-      '#items' => [],
+      '#type' => 'radios',
+      '#options' => [],
+      '#options_details' => [],
+      '#name' => 'addable-items-' . $regions_wrapper_id,
+      '#id' => 'addable-items-' . $regions_wrapper_id,
     ];
-    $list = &$component_list['#items'];
-    foreach ($components as $name => $component) {
-      // @todo: exclude entity_layout field items ...
-      // @todo: build proper checkboxes
-      if (null !== $entity->getFieldDefinition($name)) {
-        $list[] = [
-          '#markup' => $entity->getFieldDefinition($name)->getLabel(),
-          '#attributes' => [],
-        ];
+    $options = &$component_list['#options'];
+    $options_details = &$component_list['#options_details'];
+    foreach ($components as $id => $component) {
+      $options[$id] = $id;
+      $options_details[$id] = [
+        'id' => $id,
+        'delta' => null,
+      ];
+      if ('field' === $component['type']) {
+        $this->buildFieldItemsAddableItemsElement(
+          $entity,
+          $component,
+          $options,
+          $options_details
+        ); // @todo: rethink naming, dual signification of "item" is confusing
       }
     }
-
+    ksm($component_list);
     return $component_list;
   }
 
   /**
+   * @param FieldableEntityInterface $entity
+   * @param array $component
+   * @param array $options
+   * @param array $options_details
+   *
+   * @throws \InvalidArgumentException
+   */
+  protected function buildFieldItemsAddableItemsElement(FieldableEntityInterface $entity, array $component, array &$options, array &$options_details) {
+    $item_count = $entity->get($component['id'])->count();
+    $cardinality = $entity->getFieldDefinition($component['id'])
+      ->getFieldStorageDefinition()
+      ->getCardinality();
+    if (
+      1 === $cardinality
+      || $item_count < 2
+    ) {
+      return;
+    }
+    $delta = 0;
+    while ($delta < $item_count) {
+      $item_id = $component['id'] . ':' . $delta;
+      $options[$item_id] = $item_id;
+      $options_details[$item_id] = [
+        'id' => $item_id,
+        'delta' => $delta,
+      ];
+      $delta++;
+    }
+  }
+
+  /**
+   * @param \Drupal\Core\Entity\FieldableEntityInterface $entity
+   *
+   * @return array
+   * @throws \LogicException
+   */
+  protected function getRootComponents(FieldableEntityInterface $entity) {
+    // @todo: fieldgroup compatibility ?
+    // @todo: field_layout compatibility ? (is it really usefull ?)
+    $entity_type = $entity->getEntityTypeId();
+    $bundle = $entity->bundle();
+    $field_definitions = $this->entityFieldManager->getFieldDefinitions(
+      $entity_type,
+      $bundle
+    );
+    $extra_fields = $this->entityFieldManager->getExtraFields(
+      $entity_type,
+      $bundle
+    )['display'];
+    $component_definitions = array_merge(
+      $field_definitions,
+      $extra_fields
+    );
+    $components = [];
+    foreach ($component_definitions as $id => $definition) {
+      $label = $id;
+      $type = 'extrafield';
+      if (false === is_array($definition)) {
+        /** @var FieldDefinitionInterface $definition */
+        if (
+          false === $definition->isDisplayConfigurable('view')
+          || 'entity_layout_field_type' === $definition->getType()
+        ) {
+          continue;
+        }
+        $type = 'field';
+      } else {
+        $label = $definition['label'];
+      }
+      $components[$id] = [
+        'id' => $id,
+        'label' => $label,
+        'type' => $type,
+      ];
+    }
+
+    return $components;
+  }
+
+  /**
    * Get current layout id and regions values, directly from the model or based
-   * on current ajax command if needed.
+   * on current ajax $form_state if needed.
    *
    * @param $field_name
-   * @param \Drupal\Core\Field\FieldItemListInterface $items
+   * @param FieldItemListInterface $items
    * @param $delta
-   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   * @param FormStateInterface $form_state
    *
    * @return array
    */
@@ -268,8 +388,8 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $trigger = $form_state->getTriggeringElement();
     if (
       null === $trigger
-      || false === array_key_exists('#add_item', $trigger)
-      || true !== $trigger['#add_item']
+      || false === array_key_exists('#action', $trigger)
+      || 'add_item' !== $trigger['#action']
     ) {
 
       return null;
@@ -380,7 +500,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    *
    * @return array
    */
-  protected function regionsTableElement(/** @noinspection PhpInternalEntityUsedInspection */ LayoutDefinition $layout, array $item_values_regions, $regions_wrapper_id) {
+  protected function getRegionsTableElement(/** @noinspection PhpInternalEntityUsedInspection */ LayoutDefinition $layout, array $item_values_regions, $regions_wrapper_id) {
     // Initialize regions wrapper, basically a container with the relevant id
     $regions_table_id = str_replace('-wpr', '-tabledrag', $regions_wrapper_id);
     $regions_table = [
@@ -410,17 +530,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         && array_key_exists('region', $values)
         && array_key_exists('weight', $values)
       ) {
-        $delta = array_key_exists('delta', $values) ? $values['delta'] : -1;
-        $label = array_key_exists('label', $values) ?
-          $values['label'] :
-          $values['id'];
-        $content_assignment[$values['region']][$values['id']] = [
-          'id' => $values['id'],
-          'delta' => $delta,
-          'label' => $label,
-          'parent' => $values['region'],
-          'weight' => $values['weight'],
-        ];
+        $content_assignment[$values['region']][$values['id']] = $values;
       }
     }
     // Iterate over regions and build each table row accordingly
@@ -446,14 +556,14 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
 
       $region_row['add_item'] = [
         '#type' => 'button',
-        '#value' => 'go',
+        '#value' => 'Add',
         '#name' => 'add-item-' . $regions_wrapper_id . '-' . $region_id,
-        '#add_item' => true,
+        '#action' => 'add_item',
         '#regions_wrapper_id' => $regions_wrapper_id,
         '#region_id' => $region_id,
         '#ajax' => [
           'event' => 'click',
-          'callback' => [$this, 'itemAddAjaxCallback']
+          'callback' => [$this, 'regionsReplaceAjaxCallback']
         ],
       ];
 
@@ -464,6 +574,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
           'class' => [
             'region-id-' . $region_id
           ],
+          'disabled' => 'disabled',
         ],
       ];
 
@@ -489,7 +600,9 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * @param array $region_content
    */
   protected function buildItemRows (array &$regions_table, $region_id, array $region, array $region_content) {
+    // @todo: Add remove button on items
     foreach ($region_content as $item_id => $item) {
+      $label = $this->getItemLabel($item);
       $item_row = [
         '#attributes' => [
           'class' => [
@@ -498,12 +611,10 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
           ],
         ],
       ];
-      $item_row['label'] = [
-        '#markup' => $item['label'], // Label should be calculated id + delta, or title / preview
-      ];
+      $item_row['label'] = $label;
       $item_row['id'] = [
         '#type' => 'hidden',
-        '#value' => $item,
+        '#value' => $item_id,
       ];
       $item_row['delta'] = [
         '#type' => 'hidden',
@@ -519,7 +630,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
 
       $item_row['weight'] = [
         '#type' => 'weight',
-        '#title' => t('Weight for @title', array('@title' => $item['label'])),
+        '#title' => t('Weight for @title', array('@title' => $item['id'])),
         '#title_display' => 'invisible',
         '#default_value' => $item['weight'],
         '#delta' => 20,
@@ -536,28 +647,14 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
-   * Ajax callback updating regions based on selected layout.
-   *
-   * @param array $form
-   * @param \Drupal\Core\Form\FormStateInterface $form_state
-   *
-   * @return \Drupal\Core\Ajax\AjaxResponse
+   * @param $item
+   * @return array
    */
-  public function layoutSelectChangeAjaxCallback(array &$form, FormStateInterface $form_state) {
-    // Get path to updated regions wrapper in the $form.
-    list($field_name, $widget, $delta) = $form_state
-      ->getTriggeringElement()['#array_parents'];
-    // Get $regions_wrapper_id stored in layout select
-    $regions_wrapper_id = $form_state
-      ->getTriggeringElement()['#regions_wrapper_id'];
-    // Set up replacement command for old region wrapper with the updated one
-    $regions = $form[$field_name][$widget][$delta]['regions'];
-    $replace = new ReplaceCommand('#' . $regions_wrapper_id, $regions);
-    // Finally build $response and return it
-    $response = new AjaxResponse();
-    $response->addCommand($replace);
-
-    return $response;
+  protected function getItemLabel($item) {
+    // @todo: think about using a view mode to customize label
+    return [
+      '#markup' => $item['id'],
+    ];
   }
 
   /**
@@ -566,30 +663,14 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    *
    * @return \Drupal\Core\Ajax\AjaxResponse
    */
-  public function itemAddAjaxCallback(array &$form, FormStateInterface $form_state) {
+  public function regionsReplaceAjaxCallback(array &$form, FormStateInterface $form_state) {
     $response = new AjaxResponse();
     /** @noinspection ReferenceMismatchInspection */
     $trigger = $form_state->getTriggeringElement();
-    if (false === array_key_exists('#regions_wrapper_id', $trigger)) {
-
+    $regions = $this->getAjaxRegionsElement($trigger, $form);
+    if (null === $regions) {
       return $response;
     }
-    $regions_wrapper_form_index = array_search(
-      'regions',
-      $trigger['#array_parents'],
-      true
-    );
-    $regions_wrapper_form_path = array_splice(
-      $trigger['#array_parents'],
-      0,
-      $regions_wrapper_form_index
-    );
-    $regions_wrapper_form_path[] = 'regions';
-    /** @noinspection ReferenceMismatchInspection */
-    $regions = NestedArray::getValue(
-      $form_state->getCompleteForm(),
-      $regions_wrapper_form_path
-    );
     $replace = new ReplaceCommand(
       '#' . $trigger['#regions_wrapper_id'],
       $regions
@@ -599,4 +680,48 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     return $response;
   }
 
+  /**
+   * Get the regions render array portion based on current trigger and updated
+   * $form in ajax context
+   *
+   * @param array $trigger
+   * @param array $form
+   * @return array|null
+   */
+  public function getAjaxRegionsElement(array $trigger, array &$form) {
+    if (
+      false === array_key_exists('#regions_wrapper_id', $trigger)
+      || false === array_key_exists('#action', $trigger)
+    ) {
+
+      return null;
+    }
+    $regions_wrapper_form_index = null;
+    if ('add_item' === $trigger['#action']) {
+      $regions_wrapper_form_index = array_search(
+        'regions',
+        $trigger['#array_parents'],
+        true
+      );
+    } elseif ('change_layout' === $trigger['#action']) {
+      $regions_wrapper_form_index = count($trigger['#array_parents']) - 1;
+    }
+    if (null === $regions_wrapper_form_index) {
+
+      return null;
+    }
+    $regions_wrapper_form_path = array_splice(
+      $trigger['#array_parents'],
+      0,
+      $regions_wrapper_form_index
+    );
+    $regions_wrapper_form_path[] = 'regions';
+    /** @noinspection ReferenceMismatchInspection */
+    $regions = NestedArray::getValue(
+      $form,
+      $regions_wrapper_form_path
+    );
+
+    return $regions;
+  }
 }
