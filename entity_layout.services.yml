@@ -1,0 +1,5 @@
+services:
+  entity_layout.addable_items_handler:
+    class: '\Drupal\entity_layout\Service\AddableItemsHandler'
+    arguments:
+      - '@entity_field.manager'
