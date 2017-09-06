@@ -197,16 +197,40 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       }
       /** @noinspection ReferenceMismatchInspection */
       $trigger = $form_state->getTriggeringElement();
-      if ('add_item' === $trigger['#action']) {
-        // Add current added_item to used
-        $added_item_details = $this->getAddedItemDetails(
-          $form_state
-        );
-        $used[$added_item_details['id']] = $added_item_details['id'];
-      }
-      if ('remove_item' === $trigger['#action']) {
-        // Remove current item from used
-        unset($used[$trigger['#item_id']]);
+      switch ($trigger['#action']) {
+
+        case 'add_item':
+          // Add current added_item to used
+          $added_item_details = $this->getAddedItemDetails(
+            $form_state
+          );
+          $used[$added_item_details['id']] = $added_item_details['id'];
+          break;
+
+        case 'remove_item':
+          // Remove current item from used
+          unset($used[$trigger['#item_id']]);
+          break;
+
+        case 'change_layout':
+          foreach ($field_values as $delta => $field_item) {
+            if (false === array_key_exists('layout', $field_item)) {
+              continue;
+            }
+            if (
+              true === array_key_exists('regions', $field_item)
+              && '' === $field_item['layout']
+            ) {
+              /** @var array $regions */
+              $regions = $field_item['regions'];
+              foreach ($regions as $item_id => $item) {
+                if (true === array_key_exists('region', $item)) {
+                  unset($used[$item_id]);
+                }
+              }
+            }
+          }
+          break;
       }
     } else {
       foreach ($items as $delta => $item) {
@@ -292,11 +316,13 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       // If no layout is selected, just render a placeholder where regions
       // will be rendered at ajax replacement time
       $element['regions'] = [
-        '#markup' => '<div id="' . $regions_wrapper_id . '"></div>'
+        '#markup' => '<div id="' . $regions_wrapper_id . '"></div>',
+        '#regions_wrapper_id' => $regions_wrapper_id,
       ];
 
       return $element;
     }
+
     $element['regions'] = $this->getRegionsTableElement(
       $this->layoutPlugins[$layout_id],
       $regions,
@@ -368,8 +394,14 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $layout_id = isset($item->layout) ? $item->layout : null;
       $regions = isset($item->regions) && '' !== $item->regions ? $item->regions : [];
     }
-    // Add item from ajax request in region if needed
-    $this->buildAjaxUpdatedItem($regions, $items, $delta, $form_state);
+    // Update item based on ajax request in region if needed
+    $this->buildAjaxUpdatedItem(
+      $regions,
+      $items,
+      $delta,
+      $form_state,
+      $layout_id
+    );
 
     return [$layout_id, $regions];
   }
@@ -378,14 +410,15 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * Based on the current ajax request, build a new row or remove an old one
    * and update $regions render array accordingly.
    *
-   * @param $regions
+   * @param array $regions
    * @param FieldItemListInterface $items
-   * @param $delta
+   * @param int $delta
    * @param FormStateInterface $form_state
+   * @param string $layout_id
    *
    * @return null
    */
-  protected function buildAjaxUpdatedItem(&$regions, FieldItemListInterface $items, $delta, FormStateInterface $form_state) {
+  protected function buildAjaxUpdatedItem(&$regions, FieldItemListInterface $items, $delta, FormStateInterface $form_state, $layout_id) {
     /** @noinspection ReferenceMismatchInspection */
     $trigger = $form_state->getTriggeringElement();
     if (
@@ -395,25 +428,51 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
 
       return null;
     }
-    $item_details = $this->getAddedItemDetails(
-      $form_state
-    );
-    if ('add_item' === $trigger['#action']) {
-      $region_id = $trigger['#region_id'];
-      /** @noinspection ReferenceMismatchInspection */
-      $region_index = array_search($region_id, array_keys($regions), true) + 1;
-      $added_item = [
-        'id' => $item_details['id'],
-        'delta' => $item_details['delta'],
-        'weight' => 0,
-        'region' => $region_id,
-      ];
-      /** @noinspection ReferenceMismatchInspection */
-      $regions = array_slice($regions, 0, $region_index, true) +
-        array($item_details['id'] => $added_item) +
-        array_slice($regions, $region_index, count($regions) - 1, true) ;
-    } elseif ('remove_item' === $trigger['#action']) {
-      unset($regions[$trigger['#item_id']]);
+    switch ($trigger['#action']) {
+      case 'add_item':
+        $item_details = $this->getAddedItemDetails(
+          $form_state
+        );
+        $region_id = $trigger['#region_id'];
+        /** @noinspection ReferenceMismatchInspection */
+        $region_index = array_search($region_id, array_keys($regions), true) + 1;
+        $added_item = [
+          'id' => $item_details['id'],
+          'delta' => $item_details['delta'],
+          'weight' => 0,
+          'region' => $region_id,
+        ];
+        /** @noinspection ReferenceMismatchInspection */
+        $regions = array_slice($regions, 0, $region_index, true) +
+          array($item_details['id'] => $added_item) +
+          array_slice($regions, $region_index, count($regions) - 1, true);
+        break;
+
+      case 'remove_item':
+        unset($regions[$trigger['#item_id']]);
+        break;
+
+      case 'change_layout':
+        if ('' === $layout_id) {
+          $regions = [];
+
+          return null;
+        }
+        $layout = $this->layoutPlugins[$layout_id];
+        $new_regions_list = $layout->getRegionNames();
+        $default_region = $layout->getDefaultRegion();
+        /** @noinspection ReferenceMismatchInspection */
+        $updated_regions = $regions;
+        foreach ($regions as $item_id => $item) {
+          if (
+            true === array_key_exists('region', $item)
+            && false === array_key_exists($item['region'], $new_regions_list)
+          ) {
+            $updated_regions[$item_id]['region'] = $default_region;
+          }
+        }
+        $regions = $updated_regions;
+        break;
     }
   }
 
@@ -457,6 +516,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     switch($trigger['#action']) {
       case 'add_item':
       case 'remove_item':
+      case 'change_layout':
         $addable_items_form_index = array_search(
           'widget',
           $trigger['#array_parents'],
@@ -711,17 +771,15 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $response = new AjaxResponse();
     /** @noinspection ReferenceMismatchInspection */
     $trigger = $form_state->getTriggeringElement();
+    // Replace regions
     $regions = $this->grabRegionsElement($trigger, $form);
     $regions_wrapper_id = $regions['#regions_wrapper_id'];
-    if (null === $regions) {
-
-      return $response;
-    }
     $replace_regions = new ReplaceCommand(
       '#' . $regions_wrapper_id,
       $regions
     );
     $response->addCommand($replace_regions);
+    // Replace addable_items
     $addable_items_id = $this->getUniqueId('addable-items');
     /** @noinspection ReferenceMismatchInspection */
     $addable_items = $this->grabAddableItemsElement(
@@ -729,10 +787,6 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $form,
       $addable_items_id
     );
-    if (null === $addable_items) {
-
-      return $response;
-    }
     $replace_addable_items = new ReplaceCommand(
       '#' . $addable_items_id,
       $addable_items
