@@ -674,24 +674,32 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       return null;
     }
     $regions_form_index = null;
+    $regions_form_path = null;
     if ('add_item' === $trigger['#action']) {
       $regions_form_index = array_search(
         'regions',
         $trigger['#array_parents'],
         true
       ) + 1;
+      $regions_form_path = array_splice(
+        $trigger['#array_parents'],
+        0,
+        $regions_form_index
+      );
     } elseif ('change_layout' === $trigger['#action']) {
-      $regions_form_index = count($trigger['#array_parents']);
+      $widget_form_index = count($trigger['#array_parents']) - 1;
+      $widget_form_path = array_splice(
+        $trigger['#array_parents'],
+        0,
+        $widget_form_index
+      );
+      $regions_form_path = $widget_form_path;
+      $regions_form_path[] = 'regions';
     }
-    if (null === $regions_form_index) {
+    if (null === $regions_form_path) {
 
       return null;
     }
-    $regions_form_path = array_splice(
-      $trigger['#array_parents'],
-      0,
-      $regions_form_index
-    );
 
     return NestedArray::getValue(
       $form,
