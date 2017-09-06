@@ -2,12 +2,15 @@
 
 namespace Drupal\entity_layout\Plugin\Field\FieldWidget;
 
+use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Component\DependencyInjection\Exception\ServiceCircularReferenceException;
+use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;
+
 use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\entity_layout\Service\AddableItemsHandlerInterface;
-use Symfony\Component\DependencyInjection\ContainerInterface;
 use Drupal\Component\Utility\Html;
 use Drupal\Console\Core\Utils\NestedArray;
 use Drupal\Core\Ajax\AjaxResponse;
@@ -23,9 +26,6 @@ use /** @noinspection PhpInternalEntityUsedInspection */
   Drupal\Core\Layout\LayoutDefinition;
 use /** @noinspection PhpInternalEntityUsedInspection */
   Drupal\Core\Layout\LayoutPluginManagerInterface;
-
-use Symfony\Component\DependencyInjection\Exception\ServiceCircularReferenceException;
-use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;
 
 /**
  * Plugin implementation of the 'entity_layout_basic_field_widget' widget.
@@ -114,9 +114,12 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
-   * @param \Drupal\Core\Field\FieldItemListInterface $items
+   * Build the widget container wrapping the whole items of an multivalued field.
+   * The addable items input is built at widget container level.
+   *
+   * @param FieldItemListInterface $items
    * @param array $form
-   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   * @param FormStateInterface $form_state
    * @param null $get_delta
    *
    * @throws \LogicException
@@ -145,8 +148,18 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     return $field_form;
   }
 
+  /**
+   * Generate a unique id based on the current field instance to prevent ajax
+   * replacement collisions when several layout fields exists in the current
+   * entity form.
+   *
+   * @param $key
+   *
+   * @return string
+   */
   protected function getUniqueId($key) {
-
+    // We use Html::getId() instead of Html::getUniqueId() to get it match
+    // over ajax rebuilding process.
     return Html::getId(
       implode(
         '-',
@@ -162,6 +175,9 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
+   * Build a list of used addable items in the current dataset, from the model,
+   * or from the request in case of ajax rebuild.
+   *
    * @param FieldItemListInterface $items
    * @param FormStateInterface $form_state
    *
@@ -200,6 +216,8 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
+   * Simply add an element to used addable items list.
+   *
    * @param array $used
    * @param array $addable_items
    */
@@ -217,10 +235,20 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
-   * {@inheritdoc}
+   * Build a single widget element, this is called for each occurence of a
+   * multivalued field widget.
+   *
+   * @param FieldItemListInterface $items
+   * @param int $delta
+   * @param array $element
+   * @param array $form
+   * @param FormStateInterface $form_state
+   *
    * @throws \Drupal\Component\Plugin\Exception\InvalidPluginDefinitionException
    * @throws \LogicException
    * @throws \InvalidArgumentException
+   *
+   * @return array
    */
   public function formElement(FieldItemListInterface $items, $delta, array $element, array &$form, FormStateInterface $form_state) {
     // Get full field definition and field name
@@ -232,9 +260,6 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $delta,
       $form_state
     );
-    // Create an id to link layout select with region wrapper.
-    // We use Html::getId() instead of Html::getUniqueId() to get it match
-    // between a rebuilt select and a not yet rebuilt region wrapper.
     $regions_wrapper_id = $this->getUniqueId($delta . '-regions-wpr');
     $form['#after_build'][] = [$this, 'formElementAfterBuildCallback'];
     // Create layout select. This is the first column in the field schema.
@@ -278,7 +303,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * the very end of the list
    *
    * @param $form
-   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   * @param FormStateInterface $form_state
    * @return mixed
    */
   public function formElementAfterBuildCallback($form, FormStateInterface $form_state) {
@@ -295,7 +320,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * no data validation problem could prevent added item ajax processing.
    *
    * @param $form
-   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   * @param FormStateInterface $form_state
    */
   public static function addItemValidateCallback(&$form, FormStateInterface $form_state) {
     /** @noinspection ReferenceMismatchInspection */
@@ -344,10 +369,13 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
+   * Based on the current ajax request, build a new row and add it into
+   * $regions render array
+   *
    * @param $regions
-   * @param \Drupal\Core\Field\FieldItemListInterface $items
+   * @param FieldItemListInterface $items
    * @param $delta
-   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   * @param FormStateInterface $form_state
    *
    * @return null
    */
@@ -381,7 +409,12 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
-   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   * Fetch just added item details, based on current ajax request.
+   * Those details actually ships with the addable_items render array, in a
+   * custom #options_details property, so its not really submitted,
+   * but available throught $form anyway.
+   *
+   * @param FormStateInterface $form_state
    *
    * @return array
    */
@@ -397,6 +430,15 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     return $addable_items_element['#options_details'][$added_item_id];
   }
 
+  /**
+   * Return a reference to an up-to-date addable_items list
+   *
+   * @param array $trigger
+   * @param array $form
+   * @param $id
+   *
+   * @return array|null
+   */
   protected function grabAddableItemsElement(array $trigger, array $form, $id) {
     if (
       false === array_key_exists('#regions_wrapper_id', $trigger)
@@ -428,6 +470,9 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
+   * Build a categorized layout list to be displayed in a select input.
+   * Provider and category are concatenated in a single "group".
+   *
    * @return array
    */
   protected function getCategorizedLayoutList() {
@@ -457,7 +502,9 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
-   * @param \Drupal\Core\Layout\LayoutDefinition $layout
+   * Build the $regions render array, suitable for tabledrag.
+   *
+   * @param LayoutDefinition $layout
    * @param array $item_values_regions
    * @param $regions_wrapper_id
    *
@@ -557,6 +604,8 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
+   * Build tabledrag item rows in a given region.
+   *
    * @param array $regions_table
    * @param $region_id
    * @param array $region
@@ -610,7 +659,11 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
+   * Return a render array for item label, to be used in the regions table and
+   * the addable_items list.
+   *
    * @param $item
+   *
    * @return array
    */
   protected function getItemLabel($item) {
@@ -621,10 +674,13 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
-   * @param array $form
-   * @param \Drupal\Core\Form\FormStateInterface $form_state
+   * Build ajax response including relevant replacement commands based on
+   * current ajax request.
    *
-   * @return \Drupal\Core\Ajax\AjaxResponse
+   * @param array $form
+   * @param FormStateInterface $form_state
+   *
+   * @return AjaxResponse
    */
   public function replaceAjaxCallback(array &$form, FormStateInterface $form_state) {
     $response = new AjaxResponse();
@@ -642,6 +698,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     );
     $response->addCommand($replace_regions);
     $addable_items_id = $this->getUniqueId('addable-items');
+    /** @noinspection ReferenceMismatchInspection */
     $addable_items = $this->grabAddableItemsElement(
       $trigger,
       $form,
@@ -661,6 +718,8 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
+   * Return a reference to an up-to-date regions table
+   *
    * @param array $trigger
    * @param array $form
    * @return array|null
