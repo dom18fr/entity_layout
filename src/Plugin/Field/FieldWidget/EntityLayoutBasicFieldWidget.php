@@ -195,11 +195,19 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
           $this->addUsedAddableItem($used, $item['regions']);
         }
       }
-      // Add current added_item to used
-      $added_item_details = $this->getAddedItemDetails(
-        $form_state
-      );
-      $used[$added_item_details['id']] = $added_item_details['id'];
+      /** @noinspection ReferenceMismatchInspection */
+      $trigger = $form_state->getTriggeringElement();
+      if ('add_item' === $trigger['#action']) {
+        // Add current added_item to used
+        $added_item_details = $this->getAddedItemDetails(
+          $form_state
+        );
+        $used[$added_item_details['id']] = $added_item_details['id'];
+      }
+      if ('remove_item' === $trigger['#action']) {
+        // Remove current item from used
+        unset($used[$trigger['#item_id']]);
+      }
     } else {
       foreach ($items as $delta => $item) {
         $item = $items[$delta];
@@ -325,10 +333,8 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   public static function addItemValidateCallback(&$form, FormStateInterface $form_state) {
     /** @noinspection ReferenceMismatchInspection */
     $trigger = $form_state->getTriggeringElement();
-    if (
-      false === array_key_exists('#action', $trigger)
-      || 'add_item' !== $trigger['#action']
-    ) {
+    if (false === array_key_exists('#action', $trigger)) {
+
       return;
     }
     $form_state->clearErrors();
@@ -363,14 +369,14 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $regions = isset($item->regions) && '' !== $item->regions ? $item->regions : [];
     }
     // Add item from ajax request in region if needed
-    $this->buildAjaxAddedItem($regions, $items, $delta, $form_state);
+    $this->buildAjaxUpdatedItem($regions, $items, $delta, $form_state);
 
     return [$layout_id, $regions];
   }
 
   /**
-   * Based on the current ajax request, build a new row and add it into
-   * $regions render array
+   * Based on the current ajax request, build a new row or remove an old one
+   * and update $regions render array accordingly.
    *
    * @param $regions
    * @param FieldItemListInterface $items
@@ -379,13 +385,12 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    *
    * @return null
    */
-  protected function buildAjaxAddedItem(&$regions, FieldItemListInterface $items, $delta, FormStateInterface $form_state) {
+  protected function buildAjaxUpdatedItem(&$regions, FieldItemListInterface $items, $delta, FormStateInterface $form_state) {
     /** @noinspection ReferenceMismatchInspection */
     $trigger = $form_state->getTriggeringElement();
     if (
       null === $trigger
       || false === array_key_exists('#action', $trigger)
-      || 'add_item' !== $trigger['#action']
     ) {
 
       return null;
@@ -393,19 +398,23 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $item_details = $this->getAddedItemDetails(
       $form_state
     );
-    $region_id = $trigger['#region_id'];
-    /** @noinspection ReferenceMismatchInspection */
-    $region_index = array_search($region_id, array_keys($regions), true) + 1;
-    $added_item = [
-      'id' => $item_details['id'],
-      'delta' => $item_details['delta'],
-      'weight' => 0,
-      'region' => $region_id,
-    ];
-    /** @noinspection ReferenceMismatchInspection */
-    $regions = array_slice($regions, 0, $region_index, true) +
-    array($item_details['id'] => $added_item) +
-    array_slice($regions, $region_index, count($regions) - 1, true) ;
+    if ('add_item' === $trigger['#action']) {
+      $region_id = $trigger['#region_id'];
+      /** @noinspection ReferenceMismatchInspection */
+      $region_index = array_search($region_id, array_keys($regions), true) + 1;
+      $added_item = [
+        'id' => $item_details['id'],
+        'delta' => $item_details['delta'],
+        'weight' => 0,
+        'region' => $region_id,
+      ];
+      /** @noinspection ReferenceMismatchInspection */
+      $regions = array_slice($regions, 0, $region_index, true) +
+        array($item_details['id'] => $added_item) +
+        array_slice($regions, $region_index, count($regions) - 1, true) ;
+    } elseif ('remove_item' === $trigger['#action']) {
+      unset($regions[$trigger['#item_id']]);
+    }
   }
 
   /**
@@ -440,30 +449,35 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * @return array|null
    */
   protected function grabAddableItemsElement(array $trigger, array $form, $id) {
-    if (
-      false === array_key_exists('#regions_wrapper_id', $trigger)
-      || false === array_key_exists('#action', $trigger)
-    ) {
+    if (false === array_key_exists('#action', $trigger)) {
 
       return null;
     }
-    $addable_items_form_index = array_search(
-      'widget',
-      $trigger['#array_parents'],
-      true
-    );
-    $added_item_form_path = array_splice(
-      $trigger['#array_parents'],
-      0,
-      $addable_items_form_index
-    );
-    $added_item_form_path[] = 'addable_items';
-    $added_item_form_path[] = $id;
-
+    $addable_items_form_path = null;
+    switch($trigger['#action']) {
+      case 'add_item':
+      case 'remove_item':
+        $addable_items_form_index = array_search(
+          'widget',
+          $trigger['#array_parents'],
+          true
+        );
+        $addable_items_form_path = array_splice(
+          $trigger['#array_parents'],
+          0,
+          $addable_items_form_index
+        );
+        $addable_items_form_path[] = 'addable_items';
+        $addable_items_form_path[] = $id;
+        break;
+    }
+    if (null === $addable_items_form_path) {
+      return null;
+    }
     /** @noinspection ReferenceMismatchInspection */
     $addable_items = NestedArray::getValue(
       $form,
-      $added_item_form_path
+      $addable_items_form_path
     );
 
     return $addable_items;
@@ -525,7 +539,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       '#header' => [
         [
           'data' => t('Label'),
-          'colspan' => 4,
+          'colspan' => 5,
         ],
         t('Weight'),
       ]
@@ -560,13 +574,13 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $region_row['label'] = [
         '#plain_text' => $region['label'],
         '#wrapper_attributes' => [
-          'colspan' => 3
+          'colspan' => 4
         ]
       ];
 
       $region_row['add_item'] = [
         '#type' => 'button',
-        '#value' => 'Add',
+        '#value' => 'Place here',
         '#name' => 'add-item-' . $regions_wrapper_id . '-' . $region_id,
         '#action' => 'add_item',
         '#regions_wrapper_id' => $regions_wrapper_id,
@@ -612,7 +626,6 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * @param array $region_content
    */
   protected function buildItemRows (array &$regions_table, $region_id, array $region, array $region_content) {
-    // @todo: Add remove button on items
     foreach ($region_content as $item_id => $item) {
       $label = $this->getItemLabel($item);
       $item_row = [
@@ -637,6 +650,18 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         '#value' => $region_id,
         '#attributes' => [
           'data-region-id-input' => true,
+        ],
+      ];
+
+      $item_row['remove'] = [
+        '#type' => 'button',
+        '#value' => 'Remove',
+        '#action' => 'remove_item',
+        '#name' => $this->getUniqueId('remove-item-' . $item_id),
+        '#item_id' => $item_id,
+        '#ajax' => [
+          'event' => 'click',
+          'callback' => [$this, 'replaceAjaxCallback']
         ],
       ];
 
@@ -686,8 +711,8 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $response = new AjaxResponse();
     /** @noinspection ReferenceMismatchInspection */
     $trigger = $form_state->getTriggeringElement();
-    $regions_wrapper_id = $trigger['#regions_wrapper_id'];
     $regions = $this->grabRegionsElement($trigger, $form);
+    $regions_wrapper_id = $regions['#regions_wrapper_id'];
     if (null === $regions) {
 
       return $response;
@@ -725,35 +750,37 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * @return array|null
    */
   protected function grabRegionsElement(array $trigger, array &$form) {
-    if (
-      false === array_key_exists('#regions_wrapper_id', $trigger)
-      || false === array_key_exists('#action', $trigger)
-    ) {
+    if (false === array_key_exists('#action', $trigger)) {
 
       return null;
     }
     $regions_form_index = null;
     $regions_form_path = null;
-    if ('add_item' === $trigger['#action']) {
-      $regions_form_index = array_search(
-        'regions',
-        $trigger['#array_parents'],
-        true
-      ) + 1;
-      $regions_form_path = array_splice(
-        $trigger['#array_parents'],
-        0,
-        $regions_form_index
-      );
-    } elseif ('change_layout' === $trigger['#action']) {
-      $widget_form_index = count($trigger['#array_parents']) - 1;
-      $widget_form_path = array_splice(
-        $trigger['#array_parents'],
-        0,
-        $widget_form_index
-      );
-      $regions_form_path = $widget_form_path;
-      $regions_form_path[] = 'regions';
+    switch ($trigger['#action']) {
+      case 'add_item':
+      case 'remove_item':
+        $regions_form_index = array_search(
+          'regions',
+          $trigger['#array_parents'],
+          true
+        ) + 1;
+        $regions_form_path = array_splice(
+          $trigger['#array_parents'],
+          0,
+          $regions_form_index
+        );
+        break;
+
+      case 'change_layout':
+        $widget_form_index = count($trigger['#array_parents']) - 1;
+        $widget_form_path = array_splice(
+          $trigger['#array_parents'],
+          0,
+          $widget_form_index
+        );
+        $regions_form_path = $widget_form_path;
+        $regions_form_path[] = 'regions';
+        break;
     }
     if (null === $regions_form_path) {
 
