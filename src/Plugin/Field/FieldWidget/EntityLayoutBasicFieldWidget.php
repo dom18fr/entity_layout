@@ -727,5 +727,34 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $regions_form_path
     );
   }
-  
+
+  /**
+   * Cleanup submitted values, we don't need any information about region rows
+   * at render time.
+   *
+   * @param array $values
+   * @param array $form
+   * @param FormStateInterface $form_state
+   *
+   * @return array
+   */
+  public function massageFormValues(array $values, array $form, FormStateInterface $form_state) {
+    foreach ($values as $delta => &$item_values) {
+      if (null === $item_values['layout'] || '' === $item_values['layout']) {
+        $item_values['layout'] = null;
+        continue;
+      }
+      $clean_regions = [];
+      /** @var array $regions */
+      $regions = $item_values['regions'];
+      foreach($regions as $row) {
+        if (true === array_key_exists('region', $row)) {
+          $clean_regions[$row['id']] = $row;
+        }
+      }
+      $item_values['regions'] = $clean_regions;
+    }
+
+    return $values;
+  }
 }
