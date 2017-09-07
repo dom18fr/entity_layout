@@ -2,6 +2,7 @@
 
 namespace Drupal\entity_layout\Plugin\Field\FieldWidget;
 
+use Drupal\entity_layout\Utils\FieldUniqueId;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Exception\ServiceCircularReferenceException;
 use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;
@@ -11,7 +12,6 @@ use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Plugin\ContainerFactoryPluginInterface;
 use Drupal\entity_layout\Service\AddableItemsHandlerInterface;
-use Drupal\Component\Utility\Html;
 use Drupal\Console\Core\Utils\NestedArray;
 use Drupal\Core\Ajax\AjaxResponse;
 use Drupal\Core\Ajax\ReplaceCommand;
@@ -129,10 +129,13 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    */
   public function form(FieldItemListInterface $items, array &$form, FormStateInterface $form_state, $get_delta = NULL) {
     $field_form = parent::form($items, $form, $form_state, $get_delta);
-    $used_addable_items = $this->getUsedAddableItems($items, $form_state);
+    $used_addable_items = $this->addableItemsHandler->getUsedAddableItems($items, $form_state);
     /** @var FieldableEntityInterface $entity */
     $entity = $items->getEntity();
-    $addable_id = $this->getUniqueId('addable-items');
+    $addable_id = FieldUniqueId::getUniqueId(
+      $this->fieldDefinition,
+      'addable-items'
+    );
     $field_form['addable_items'] = [];
     $addable = &$field_form['addable_items'];
     $addable[$addable_id] = $this->addableItemsHandler->getAddableItemsElement(
@@ -146,124 +149,6 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $addable['#tree'] = true;
 
     return $field_form;
-  }
-
-  /**
-   * Generate a unique id based on the current field instance to prevent ajax
-   * replacement collisions when several layout fields exists in the current
-   * entity form.
-   *
-   * @param $key
-   *
-   * @return string
-   */
-  protected function getUniqueId($key) {
-    // We use Html::getId() instead of Html::getUniqueId() to get it match
-    // over ajax rebuilding process.
-    return Html::getId(
-      implode(
-        '-',
-        [
-          'entity-layout',
-          $this->fieldDefinition->getTargetEntityTypeId(),
-          $this->fieldDefinition->getTargetBundle(),
-          $this->fieldDefinition->getName(),
-          $key,
-        ]
-      )
-    );
-  }
-
-  /**
-   * Build a list of used addable items in the current dataset, from the model,
-   * or from the request in case of ajax rebuild.
-   *
-   * @param FieldItemListInterface $items
-   * @param FormStateInterface $form_state
-   *
-   * @return array
-   */
-  protected function getUsedAddableItems(FieldItemListInterface $items, FormStateInterface $form_state) {
-    $field_name = $this->fieldDefinition->getName();
-    $used = [];
-    /** @noinspection ReferenceMismatchInspection */
-    $field_values = $form_state->getValue($field_name);
-    if (null !== $field_values) {
-      /** @var array $field_values */
-      foreach ($field_values as $delta => $item) {
-        if (true === array_key_exists('regions', $item)) {
-          $this->addUsedAddableItem($used, $item['regions']);
-        }
-      }
-      /** @noinspection ReferenceMismatchInspection */
-      $trigger = $form_state->getTriggeringElement();
-      switch ($trigger['#action']) {
-
-        case 'add_item':
-          // Add current added_item to used
-          $added_item_details = $this->getAddedItemDetails(
-            $form_state
-          );
-          $used[$added_item_details['id']] = $added_item_details['id'];
-          break;
-
-        case 'remove_item':
-          // Remove current item from used
-          unset($used[$trigger['#item_id']]);
-          break;
-
-        case 'change_layout':
-          foreach ($field_values as $delta => $field_item) {
-            if (false === array_key_exists('layout', $field_item)) {
-              continue;
-            }
-            if (
-              true === array_key_exists('regions', $field_item)
-              && '' === $field_item['layout']
-            ) {
-              /** @var array $regions */
-              $regions = $field_item['regions'];
-              foreach ($regions as $item_id => $item) {
-                if (true === array_key_exists('region', $item)) {
-                  unset($used[$item_id]);
-                }
-              }
-            }
-          }
-          break;
-      }
-    } else {
-      foreach ($items as $delta => $item) {
-        $item = $items[$delta];
-        if (
-          isset($item->regions)
-          && '' !== $item->regions
-        ) {
-          $this->addUsedAddableItem($used, $item->regions);
-        }
-      }
-    }
-
-    return $used;
-  }
-
-  /**
-   * Simply add an element to used addable items list.
-   *
-   * @param array $used
-   * @param array $addable_items
-   */
-  protected function addUsedAddableItem(array &$used, array $addable_items) {
-    foreach ($addable_items as $item) {
-      /** @noinspection ReferenceMismatchInspection */
-      if (
-        false === array_key_exists('region', $item)
-        || true === array_key_exists($item['id'], $used)
-      ) {
-        continue;
-      }
-      $used[$item['id']] = $item['id'];
-    }
   }
 
   /**
@@ -292,7 +177,10 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $delta,
       $form_state
     );
-    $regions_wrapper_id = $this->getUniqueId($delta . '-regions-wpr');
+    $regions_wrapper_id = FieldUniqueId::getUniqueId(
+      $this->fieldDefinition,
+      $delta . '-regions-wpr'
+    );
     $form['#after_build'][] = [$this, 'formElementAfterBuildCallback'];
     // Create layout select. This is the first column in the field schema.
     // Regions mapping have to be rebuilt when layout changes since each layout
@@ -326,7 +214,8 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $element['regions'] = $this->getRegionsTableElement(
       $this->layoutPlugins[$layout_id],
       $regions,
-      $regions_wrapper_id
+      $regions_wrapper_id,
+      $delta
     );
 
     return $element;
@@ -378,39 +267,41 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * @return array
    */
   protected function getElementValues($field_name, FieldItemListInterface $items, $delta, FormStateInterface $form_state) {
-    // Initialize layout id
+    // Initialize layout id and regions values
     $layout_id = null;
+    $regions_values = null;
     // Try to get a layout_id & regions from $form_state, if this is not null
     // it means the field values have just been changed, so we are in case of an ajax rebuild.
     // Else layout_id and regions  is retrieved from the model, using $items.
     if (null !== $form_state->getValue($field_name)) {
       $layout_id = $form_state->getValue($field_name)[$delta]['layout'];
-      $regions = $form_state->getValue($field_name)[$delta]['regions'];
-      if (null === $regions || '' === $regions) {
-        $regions = [];
-      }
+      $regions_values = $form_state->getValue($field_name)[$delta]['regions'];
     } else {
       $item = $items[$delta];
       $layout_id = isset($item->layout) ? $item->layout : null;
-      $regions = isset($item->regions) && '' !== $item->regions ? $item->regions : [];
+      $regions_values = isset($item->regions) && null !== $item->regions ? $item->regions : [];
     }
-    // Update item based on ajax request in region if needed
-    $this->buildAjaxUpdatedItem(
-      $regions,
-      $items,
-      $delta,
-      $form_state,
-      $layout_id
-    );
+    if (null === $regions_values || '' === $regions_values) {
+      $regions_values = [];
+    } else {
+      // Update item based on ajax request in region if needed
+      $this->buildAjaxUpdatedItem(
+        $regions_values,
+        $items,
+        $delta,
+        $form_state,
+        $layout_id
+      );
+    }
 
-    return [$layout_id, $regions];
+    return [$layout_id, $regions_values];
   }
 
   /**
    * Based on the current ajax request, build a new row or remove an old one
    * and update $regions render array accordingly.
    *
-   * @param array $regions
+   * @param $regions_values
    * @param FieldItemListInterface $items
    * @param int $delta
    * @param FormStateInterface $form_state
@@ -418,12 +309,18 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    *
    * @return null
    */
-  protected function buildAjaxUpdatedItem(&$regions, FieldItemListInterface $items, $delta, FormStateInterface $form_state, $layout_id) {
+  protected function buildAjaxUpdatedItem(array &$regions_values, FieldItemListInterface $items, $delta, FormStateInterface $form_state, $layout_id) {
     /** @noinspection ReferenceMismatchInspection */
     $trigger = $form_state->getTriggeringElement();
+    $regions_wrapper_id = FieldUniqueId::getUniqueId(
+      $this->fieldDefinition,
+      $delta . '-regions-wpr'
+    );
     if (
       null === $trigger
       || false === array_key_exists('#action', $trigger)
+      || false === array_key_exists('#regions_wrapper_id', $trigger)
+      || $regions_wrapper_id !== $trigger['#regions_wrapper_id']
     ) {
 
       return null;
@@ -433,9 +330,13 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         $item_details = $this->getAddedItemDetails(
           $form_state
         );
+        if (null === $item_details) {
+
+          return null;
+        }
         $region_id = $trigger['#region_id'];
         /** @noinspection ReferenceMismatchInspection */
-        $region_index = array_search($region_id, array_keys($regions), true) + 1;
+        $region_index = array_search($region_id, array_keys($regions_values), true) + 1;
         $added_item = [
           'id' => $item_details['id'],
           'delta' => $item_details['delta'],
@@ -443,18 +344,23 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
           'region' => $region_id,
         ];
         /** @noinspection ReferenceMismatchInspection */
-        $regions = array_slice($regions, 0, $region_index, true) +
-          array($item_details['id'] => $added_item) +
-          array_slice($regions, $region_index, count($regions) - 1, true);
+        $regions_values = array_slice($regions_values, 0, $region_index, true) +
+          [$item_details['id'] => $added_item] +
+          array_slice(
+            $regions_values,
+            $region_index,
+            count($regions_values) - 1,
+            true
+          );
         break;
 
       case 'remove_item':
-        unset($regions[$trigger['#item_id']]);
+        unset($regions_values[$trigger['#item_id']]);
         break;
 
       case 'change_layout':
         if ('' === $layout_id) {
-          $regions = [];
+          $regions_values = [];
 
           return null;
         }
@@ -462,8 +368,8 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         $new_regions_list = $layout->getRegionNames();
         $default_region = $layout->getDefaultRegion();
         /** @noinspection ReferenceMismatchInspection */
-        $updated_regions = $regions;
-        foreach ($regions as $item_id => $item) {
+        $updated_regions = $regions_values;
+        foreach ($regions_values as $item_id => $item) {
           if (
             true === array_key_exists('region', $item)
             && false === array_key_exists($item['region'], $new_regions_list)
@@ -471,7 +377,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
             $updated_regions[$item_id]['region'] = $default_region;
           }
         }
-        $regions = $updated_regions;
+        $regions_values = $updated_regions;
         break;
     }
   }
@@ -487,8 +393,11 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * @return array
    */
   protected function getAddedItemDetails(FormStateInterface $form_state) {
-    $addable_items_id = $this->getUniqueId('addable-items');
-    $addable_items_element = $this->grabAddableItemsElement(
+    $addable_items_id = FieldUniqueId::getUniqueId(
+      $this->fieldDefinition,
+      'addable-items'
+    );
+    $addable_items_element = $this->addableItemsHandler->grabAddableItemsElement(
       $form_state->getTriggeringElement(),
       $form_state->getCompleteForm(),
       $addable_items_id
@@ -496,51 +405,6 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $added_item_id = $form_state->getValue('addable_items')[$addable_items_id];
 
     return $addable_items_element['#options_details'][$added_item_id];
-  }
-
-  /**
-   * Return a reference to an up-to-date addable_items list
-   *
-   * @param array $trigger
-   * @param array $form
-   * @param $id
-   *
-   * @return array|null
-   */
-  protected function grabAddableItemsElement(array $trigger, array $form, $id) {
-    if (false === array_key_exists('#action', $trigger)) {
-
-      return null;
-    }
-    $addable_items_form_path = null;
-    switch($trigger['#action']) {
-      case 'add_item':
-      case 'remove_item':
-      case 'change_layout':
-        $addable_items_form_index = array_search(
-          'widget',
-          $trigger['#array_parents'],
-          true
-        );
-        $addable_items_form_path = array_splice(
-          $trigger['#array_parents'],
-          0,
-          $addable_items_form_index
-        );
-        $addable_items_form_path[] = 'addable_items';
-        $addable_items_form_path[] = $id;
-        break;
-    }
-    if (null === $addable_items_form_path) {
-      return null;
-    }
-    /** @noinspection ReferenceMismatchInspection */
-    $addable_items = NestedArray::getValue(
-      $form,
-      $addable_items_form_path
-    );
-
-    return $addable_items;
   }
 
   /**
@@ -580,11 +444,11 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    *
    * @param LayoutDefinition $layout
    * @param array $item_values_regions
-   * @param $regions_wrapper_id
-   *
+   * @param string $regions_wrapper_id
+   * @param int $delta
    * @return array
    */
-  protected function getRegionsTableElement(/** @noinspection PhpInternalEntityUsedInspection */ LayoutDefinition $layout, array $item_values_regions, $regions_wrapper_id) {
+  protected function getRegionsTableElement(/** @noinspection PhpInternalEntityUsedInspection */ LayoutDefinition $layout, array $item_values_regions, $regions_wrapper_id, $delta) {
     // Initialize regions wrapper, basically a container with the relevant id
     $regions_table_id = str_replace('-wpr', '-tabledrag', $regions_wrapper_id);
     $regions_table = [
@@ -598,10 +462,9 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       '#regions_wrapper_id' => $regions_wrapper_id,
       '#header' => [
         [
-          'data' => t('Label'),
-          'colspan' => 5,
+          'data' => $layout->getLabel(),
+          'colspan' => 6,
         ],
-        t('Weight'),
       ]
     ];
 
@@ -634,7 +497,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $region_row['label'] = [
         '#plain_text' => $region['label'],
         '#wrapper_attributes' => [
-          'colspan' => 4
+          'colspan' => 3
         ]
       ];
 
@@ -662,11 +525,17 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         ],
       ];
 
+      /** @noinspection DisconnectedForeachInstructionInspection */
+      $region_row['weight'] = [
+        '#markup' => null,
+      ];
+
       $regions_table[$region_id] = $region_row;
       // build items rows for a given region row
       $this->buildItemRows(
         $regions_table,
         $region_id,
+        $delta,
         $region,
         $content_assignment[$region_id]
       );
@@ -682,10 +551,11 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    *
    * @param array $regions_table
    * @param $region_id
+   * @param int $delta
    * @param array $region
    * @param array $region_content
    */
-  protected function buildItemRows (array &$regions_table, $region_id, array $region, array $region_content) {
+  protected function buildItemRows (array &$regions_table, $region_id, $delta, array $region, array $region_content) {
     foreach ($region_content as $item_id => $item) {
       $label = $this->getItemLabel($item);
       $item_row = [
@@ -717,7 +587,14 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         '#type' => 'button',
         '#value' => 'Remove',
         '#action' => 'remove_item',
-        '#name' => $this->getUniqueId('remove-item-' . $item_id),
+        '#name' => FieldUniqueId::getUniqueId(
+          $this->fieldDefinition,
+          $delta . '-remove-item-' . $item_id
+        ),
+        '#regions_wrapper_id' => FieldUniqueId::getUniqueId(
+          $this->fieldDefinition,
+          $delta . '-regions-wpr'
+        ),
         '#item_id' => $item_id,
         '#ajax' => [
           'event' => 'click',
@@ -774,15 +651,19 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     // Replace regions
     $regions = $this->grabRegionsElement($trigger, $form);
     $regions_wrapper_id = $regions['#regions_wrapper_id'];
+
     $replace_regions = new ReplaceCommand(
       '#' . $regions_wrapper_id,
       $regions
     );
     $response->addCommand($replace_regions);
     // Replace addable_items
-    $addable_items_id = $this->getUniqueId('addable-items');
+    $addable_items_id = FieldUniqueId::getUniqueId(
+      $this->fieldDefinition,
+      'addable-items'
+    );
     /** @noinspection ReferenceMismatchInspection */
-    $addable_items = $this->grabAddableItemsElement(
+    $addable_items = $this->addableItemsHandler->grabAddableItemsElement(
       $trigger,
       $form,
       $addable_items_id

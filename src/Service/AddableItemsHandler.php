@@ -2,9 +2,13 @@
 
 namespace Drupal\entity_layout\Service;
 
+use Drupal\Console\Core\Utils\NestedArray;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Field\FieldDefinitionInterface;
+use Drupal\Core\Field\FieldItemListInterface;
+use Drupal\Core\Form\FormStateInterface;
+use Drupal\entity_layout\Utils\FieldUniqueId;
 
 class AddableItemsHandler implements AddableItemsHandlerInterface {
 
@@ -142,5 +146,146 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
     }
 
     return $components;
+  }
+
+  /**
+   * Build a list of used addable items in the current dataset, from the model,
+   * or from the request in case of ajax rebuild.
+   *
+   * @param FieldItemListInterface $items
+   * @param FormStateInterface $form_state
+   *
+   * @return array
+   */
+  public function getUsedAddableItems(FieldItemListInterface $items, FormStateInterface $form_state) {
+    $field_name = $items->getFieldDefinition()->getName();
+    $used = [];
+    /** @noinspection ReferenceMismatchInspection */
+    $field_values = $form_state->getValue($field_name);
+    if (null !== $field_values) {
+      /** @var array $field_values */
+      foreach ($field_values as $delta => $item) {
+        if (true === array_key_exists('regions', $item)) {
+          $this->addUsedAddableItem($used, $item['regions']);
+        }
+      }
+      /** @noinspection ReferenceMismatchInspection */
+      $trigger = $form_state->getTriggeringElement();
+      switch ($trigger['#action']) {
+
+        case 'add_item':
+          $addable_items_id = FieldUniqueId::getUniqueId(
+            $items->getFieldDefinition(),
+            'addable-items'
+          );
+          /** @noinspection ReferenceMismatchInspection */
+          $addable_items_values = $form_state->getValue('addable_items');
+          $added_item_id = $addable_items_values[$addable_items_id];
+          // Add current added_item to used
+          $used[$added_item_id] = $added_item_id;
+          break;
+
+        case 'remove_item':
+          // Remove current item from used
+          unset($used[$trigger['#item_id']]);
+          break;
+
+        case 'change_layout':
+          foreach ($field_values as $delta => $field_item) {
+            if (false === array_key_exists('layout', $field_item)) {
+              continue;
+            }
+            if (
+              true === array_key_exists('regions', $field_item)
+              && '' === $field_item['layout']
+            ) {
+              /** @var array $regions */
+              $regions = $field_item['regions'];
+              foreach ($regions as $item_id => $item) {
+                if (true === array_key_exists('region', $item)) {
+                  unset($used[$item_id]);
+                }
+              }
+            }
+          }
+          break;
+      }
+    } else {
+      foreach ($items as $delta => $item) {
+        $item = $items[$delta];
+        if (
+          isset($item->regions)
+          && '' !== $item->regions
+        ) {
+          $this->addUsedAddableItem($used, $item->regions);
+        }
+      }
+    }
+
+    return $used;
+  }
+
+  /**
+   * Simply add an element to used addable items list.
+   *
+   * @param array $used
+   * @param array $addable_items
+   */
+  protected function addUsedAddableItem(array &$used, array $addable_items) {
+    foreach ($addable_items as $item) {
+      /** @noinspection ReferenceMismatchInspection */
+      if (
+        false === array_key_exists('region', $item)
+        || true === array_key_exists($item['id'], $used)
+      ) {
+        continue;
+      }
+      $used[$item['id']] = $item['id'];
+    }
+  }
+
+  /**
+   * Return a reference to an up-to-date addable_items list
+   *
+   * @param array $trigger
+   * @param array $form
+   * @param $id
+   *
+   * @return array|null
+   */
+  public function grabAddableItemsElement(array $trigger, array $form, $id) {
+    if (false === array_key_exists('#action', $trigger)) {
+
+      return null;
+    }
+    $addable_items_form_path = null;
+    switch($trigger['#action']) {
+      case 'add_item':
+      case 'remove_item':
+      case 'change_layout':
+        $addable_items_form_index = array_search(
+          'widget',
+          $trigger['#array_parents'],
+          true
+        );
+        $addable_items_form_path = array_splice(
+          $trigger['#array_parents'],
+          0,
+          $addable_items_form_index
+        );
+        $addable_items_form_path[] = 'addable_items';
+        $addable_items_form_path[] = $id;
+        break;
+    }
+    if (null === $addable_items_form_path) {
+      return null;
+    }
+    /** @noinspection ReferenceMismatchInspection */
+    $addable_items = NestedArray::getValue(
+      $form,
+      $addable_items_form_path
+    );
+
+    return $addable_items;
   }
 }
