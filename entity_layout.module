@@ -5,12 +5,14 @@
  * Contains entity_layout.module..
  */
 
+use Drupal\Core\Entity\Display\EntityViewDisplayInterface;
+use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
 
 /**
  * Implements hook_help().
  * @param $route_name
- * @param \Drupal\Core\Routing\RouteMatchInterface $route_match
+ * @param RouteMatchInterface $route_match
  * @return string
  */
 function entity_layout_help($route_name, RouteMatchInterface $route_match) {
@@ -24,4 +26,30 @@ function entity_layout_help($route_name, RouteMatchInterface $route_match) {
   }
 
   return null;
+}
+
+/**
+ * Implements hook_entity_view_alter().
+ *
+ * @param array $build
+ * @param EntityInterface $entity
+ * @param EntityViewDisplayInterface $display
+ */
+function entity_layout_entity_view_alter(array &$build, EntityInterface $entity, EntityViewDisplayInterface $display) {
+  foreach($display->getComponents() as $name => $component) {
+    if (
+      false === array_key_exists('type', $component)
+      || 'entity_layout_field_formatter' !== $component['type']
+    ) {
+      continue;
+    }
+    $build['#entity_layout'] = $name;
+    // @todo: use a static method for pre_render
+    $build['#pre_render'][] = '_entity_layout_pre_render';
+  }
+}
+
+function _entity_layout_pre_render($build) {
+  ksm($build);
+  return $build;
 }

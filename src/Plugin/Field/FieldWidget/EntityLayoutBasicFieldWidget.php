@@ -336,7 +336,11 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         }
         $region_id = $trigger['#region_id'];
         /** @noinspection ReferenceMismatchInspection */
-        $region_index = array_search($region_id, array_keys($regions_values), true) + 1;
+        $region_index = array_search(
+          $region_id,
+          array_keys($regions_values),
+          true
+        ) + 1;
         $added_item = [
           'id' => $item_details['id'],
           'delta' => $item_details['delta'],

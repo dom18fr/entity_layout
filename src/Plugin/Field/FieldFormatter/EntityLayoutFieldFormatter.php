@@ -43,8 +43,6 @@ class EntityLayoutFieldFormatter extends FormatterBase {
       ];
     }
 
-    ksm($element);
-
     return $element;
   }
 
