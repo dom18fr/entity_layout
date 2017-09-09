@@ -2,7 +2,7 @@
 
 namespace Drupal\entity_layout\Plugin\Field\FieldWidget;
 
-use Drupal\entity_layout\Utils\FieldUniqueId;
+use Drupal\entity_layout\FieldUniqueId;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Exception\ServiceCircularReferenceException;
 use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;

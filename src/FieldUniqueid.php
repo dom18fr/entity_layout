@@ -1,5 +1,5 @@
 <?php
-namespace Drupal\entity_layout\Utils;
+namespace Drupal\entity_layout;
 
 use Drupal\Component\Utility\Html;
 use Drupal\Core\Field\FieldDefinitionInterface;

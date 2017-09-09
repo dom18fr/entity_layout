@@ -29,13 +29,34 @@ function entity_layout_help($route_name, RouteMatchInterface $route_match) {
 }
 
 /**
- * Implements hook_entity_view_alter().
+ * Implements hook_module_implements_alter().
+ *
+ * @param $implementations
+ * @param $hook
+ */
+function entity_layout_module_implements_alter(&$implementations, $hook) {
+  if ('entity_view_alter' === $hook) {
+    unset($implementations['entity_layout']);
+    $implementations['entity_layout'] = false;
+  }
+}
+
+/**
+ * Implements hook_entity_view().
  *
  * @param array $build
  * @param EntityInterface $entity
  * @param EntityViewDisplayInterface $display
+ * @param $view_mode
+ */
+/**
+ * Implements hook_entity_view_alter().
+ * @param array $build
+ * @param \Drupal\Core\Entity\EntityInterface $entity
+ * @param \Drupal\Core\Entity\Display\EntityViewDisplayInterface $display
  */
 function entity_layout_entity_view_alter(array &$build, EntityInterface $entity, EntityViewDisplayInterface $display) {
+  // Iterate over all displayable components to find an entity layout formatter.
   foreach($display->getComponents() as $name => $component) {
     if (
       false === array_key_exists('type', $component)
@@ -43,13 +64,17 @@ function entity_layout_entity_view_alter(array &$build, EntityInterface $entity,
     ) {
       continue;
     }
+    // Store the name of the component that contain entity_layout data
     $build['#entity_layout'] = $name;
-    // @todo: use a static method for pre_render
-    $build['#pre_render'][] = '_entity_layout_pre_render';
+    // Register a pre_render callback to perform actual layout transformation
+    // at the very last step of the render process
+    $build['#pre_render'][] = 'entity_layout_pre_render';
   }
 }
 
-function _entity_layout_pre_render($build) {
+function entity_layout_pre_render($build) {
   ksm($build);
+  dump($build);
+  die;
   return $build;
 }

@@ -8,7 +8,7 @@ use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Form\FormStateInterface;
-use Drupal\entity_layout\Utils\FieldUniqueId;
+use Drupal\entity_layout\FieldUniqueId;
 
 class AddableItemsHandler implements AddableItemsHandlerInterface {
 
@@ -92,7 +92,8 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
     $delta = 0;
     while ($delta < $item_count) {
       $item_id = $component['id'] . ':' . $delta;
-      $options[$item_id] = $item_id;
+      // @todo: move EntityLayoutBasicFieldWidget::getItemLabel() in utilities and use it here
+      $options[$item_id] = '-- ' . $item_id;
       $options_details[$item_id] = [
         'id' => $item_id,
         'delta' => $delta,
