@@ -1,16 +1,13 @@
 <?php
 
-/**
- * @file
- * Contains entity_layout.module..
- */
-
 use Drupal\Core\Entity\Display\EntityViewDisplayInterface;
 use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Render\Element;
 use Drupal\Core\Routing\RouteMatchInterface;
 
 /**
  * Implements hook_help().
+ *
  * @param $route_name
  * @param RouteMatchInterface $route_match
  * @return string
@@ -42,39 +39,25 @@ function entity_layout_module_implements_alter(&$implementations, $hook) {
 }
 
 /**
- * Implements hook_entity_view().
+ * Implements hook_entity_view_alter().
  *
  * @param array $build
  * @param EntityInterface $entity
  * @param EntityViewDisplayInterface $display
- * @param $view_mode
- */
-/**
- * Implements hook_entity_view_alter().
- * @param array $build
- * @param \Drupal\Core\Entity\EntityInterface $entity
- * @param \Drupal\Core\Entity\Display\EntityViewDisplayInterface $display
  */
 function entity_layout_entity_view_alter(array &$build, EntityInterface $entity, EntityViewDisplayInterface $display) {
-  // Iterate over all displayable components to find an entity layout formatter.
-  foreach($display->getComponents() as $name => $component) {
-    if (
-      false === array_key_exists('type', $component)
-      || 'entity_layout_field_formatter' !== $component['type']
-    ) {
-      continue;
-    }
-    // Store the name of the component that contain entity_layout data
-    $build['#entity_layout'] = $name;
-    // Register a pre_render callback to perform actual layout transformation
-    // at the very last step of the render process
-    $build['#pre_render'][] = 'entity_layout_pre_render';
-  }
+  Drupal::service('entity_layout.layout_renderer')->entityViewAlter(
+    $build,
+    $display
+  );
 }
 
-function entity_layout_pre_render($build) {
-  ksm($build);
-  dump($build);
-  die;
-  return $build;
+/**
+ * @param $variables
+ */
+function entity_layout_preprocess(&$variables, $hook) {
+  Drupal::service('entity_layout.layout_renderer')->preprocess(
+    $variables,
+    $hook
+  );
 }
