@@ -25,11 +25,12 @@
 
           var weight = -Math.round($table.find('.draggable').length / 2);
 
-          $table.find('[data-region-id=' + newRegionId + ']').nextUntil('[data-region-id]')
+          $table.find('[data-region-id=' + newRegionId + ']')
+            .nextUntil('[data-region-id]')
             .find('.item-weight').val(function () {
 
-            return ++weight;
-          });
+              return ++weight;
+            });
         };
       });
     }
