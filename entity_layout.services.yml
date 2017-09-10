@@ -7,4 +7,4 @@ services:
   entity_layout.layout_renderer:
     class: '\Drupal\entity_layout\Service\LayoutRenderer'
     arguments:
-      - '@theme.registry'
+      - '@plugin.manager.core.layout'

@@ -10,7 +10,7 @@ class FieldUniqueId {
    * replacement collisions when several layout fields exists in the current
    * entity form.
    *
-   * @param \Drupal\Core\Field\FieldDefinitionInterface $field_definition
+   * @param FieldDefinitionInterface $field_definition
    * @param $key
    * @return string
    */

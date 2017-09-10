@@ -1,7 +1,0 @@
-entity_layout_test_form:
-  path: '/entity-layout/test-form'
-  defaults:
-    _form: '\Drupal\entity_layout\Form\TestForm'
-    _title: 'Yolo'
-  requirements:
-    _permission: 'access content'
