@@ -8,6 +8,7 @@ use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\Core\Render\Element;
 use Drupal\entity_layout\FieldUniqueId;
 
 class AddableItemsHandler implements AddableItemsHandlerInterface {
@@ -22,14 +23,14 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
   public function __construct(EntityFieldManagerInterface $entity_field_manager) {
     $this->entityFieldManager = $entity_field_manager;
   }
-
+  
   /**
    * @param FieldableEntityInterface $entity
    * @param array $used
-   * @param $addable_item_id
+   * @param string $addable_item_id
    *
-   * @throws \LogicException
    * @throws \InvalidArgumentException
+   * @throws \LogicException
    *
    * @return array
    */
@@ -69,7 +70,7 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
 
     return $component_list;
   }
-
+  
   /**
    * @param FieldableEntityInterface $entity
    * @param array $component
@@ -80,7 +81,12 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
    */
   protected function buildFieldItemsAddableItemsElement(FieldableEntityInterface $entity, array $component, array &$options, array &$options_details) {
     $item_count = $entity->get($component['id'])->count();
-    $cardinality = $entity->getFieldDefinition($component['id'])
+    $field_definition = $entity->getFieldDefinition($component['id']);
+    if (null === $field_definition) {
+      
+      return;
+    }
+    $cardinality = $field_definition
       ->getFieldStorageDefinition()
       ->getCardinality();
     if (

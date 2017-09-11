@@ -1,7 +1,8 @@
 <?php
-
+// @todo: Find a simple way to trigger addable items update when new field item is added (server side data are actually allready updated, but not replaced front side)
 namespace Drupal\entity_layout\Plugin\Field\FieldWidget;
 
+use Drupal\Core\Entity\EntityForm;
 use Drupal\entity_layout\FieldUniqueId;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Exception\ServiceCircularReferenceException;
@@ -130,14 +131,16 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   public function form(FieldItemListInterface $items, array &$form, FormStateInterface $form_state, $get_delta = NULL) {
     $field_form = parent::form($items, $form, $form_state, $get_delta);
     $used_addable_items = $this->addableItemsHandler->getUsedAddableItems($items, $form_state);
-    /** @var FieldableEntityInterface $entity */
-    $entity = $items->getEntity();
     $addable_id = FieldUniqueId::getUniqueId(
       $this->fieldDefinition,
       'addable-items'
     );
     $field_form['addable_items'] = [];
     $addable = &$field_form['addable_items'];
+    /** @var EntityForm $form_object */
+    $form_object = $form_state->getFormObject();
+    /** @var FieldableEntityInterface $entity */
+    $entity = $form_object->getEntity();
     $addable[$addable_id] = $this->addableItemsHandler->getAddableItemsElement(
       $entity,
       $used_addable_items,
@@ -147,7 +150,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $addable[$addable_id]['#suffix'] = '</div>';
 
     $addable['#tree'] = true;
-
+    
     return $field_form;
   }
 
@@ -348,14 +351,16 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
           'region' => $region_id,
         ];
         /** @noinspection ReferenceMismatchInspection */
-        $regions_values = array_slice($regions_values, 0, $region_index, true) +
-          [$item_details['id'] => $added_item] +
+        $regions_values = array_merge(
+          array_slice($regions_values, 0, $region_index, true),
+          [$item_details['id'] => $added_item],
           array_slice(
             $regions_values,
             $region_index,
             count($regions_values) - 1,
             true
-          );
+          )
+        );
         break;
 
       case 'remove_item':

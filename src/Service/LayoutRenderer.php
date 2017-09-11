@@ -136,12 +136,12 @@ class LayoutRenderer implements LayoutRendererInterface {
   }
 
   /**
-   * @param $item
-   * @param $content
+   * @param array $item
+   * @param array $content
    *
    * @return array
    */
-  protected function extractRenderableItem($item, &$content) {
+  protected function extractRenderableItem($item, array &$content) {
     if (
       false === array_key_exists('delta', $item)
       || false === array_key_exists('weight', $item)
@@ -151,6 +151,7 @@ class LayoutRenderer implements LayoutRendererInterface {
       return [];
     }
     if ('' === $item['delta']) {
+      /** @noinspection ReferenceMismatchInspection */
       if (true === array_key_exists($item['id'], $content)) {
         $renderable = $content[$item['id']];
         unset($content[$item['id']]);
@@ -160,6 +161,7 @@ class LayoutRenderer implements LayoutRendererInterface {
       }
     } else {
       $root_id = str_replace(':' . $item['delta'], '', $item['id']);
+      /** @noinspection ReferenceMismatchInspection */
       if (
         true === array_key_exists($root_id, $content)
         && true === array_key_exists($item['delta'], $content[$root_id])
