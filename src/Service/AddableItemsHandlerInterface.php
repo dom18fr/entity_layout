@@ -16,4 +16,6 @@ interface AddableItemsHandlerInterface {
   public function getUsedAddableItems(FieldItemListInterface $items, FormStateInterface $form_state);
 
   public function grabAddableItemsElement(array $trigger, array $form, $id);
+  
+  public function processEntityForm(array &$form, FormStateInterface $form_state);
 }

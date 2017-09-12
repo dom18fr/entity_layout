@@ -128,7 +128,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    *
    * @return array
    */
-  public function form(FieldItemListInterface $items, array &$form, FormStateInterface $form_state, $get_delta = NULL) {
+  public function form(FieldItemListInterface $items, array &$form, FormStateInterface $form_state, $get_delta = null) {
     $field_form = parent::form($items, $form, $form_state, $get_delta);
     $used_addable_items = $this->addableItemsHandler->getUsedAddableItems($items, $form_state);
     $addable_id = FieldUniqueId::getUniqueId(
@@ -150,6 +150,10 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $addable[$addable_id]['#suffix'] = '</div>';
 
     $addable['#tree'] = true;
+  
+    // Store the names of entity_layout fields to be used later
+    $entity_layout_field = $items->getFieldDefinition()->getName();
+    $form['#entity_layout_fields'][$entity_layout_field] = $entity_layout_field;
     
     return $field_form;
   }
@@ -237,7 +241,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       get_class($this),
       'addItemValidateCallback',
     ];
-
+    
     return $form;
   }
 
@@ -276,9 +280,16 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     // Try to get a layout_id & regions from $form_state, if this is not null
     // it means the field values have just been changed, so we are in case of an ajax rebuild.
     // Else layout_id and regions  is retrieved from the model, using $items.
+    /** @noinspection ReferenceMismatchInspection */
+    $input = $form_state->getUserInput();
+    $current_values = null;
     if (null !== $form_state->getValue($field_name)) {
       $layout_id = $form_state->getValue($field_name)[$delta]['layout'];
       $regions_values = $form_state->getValue($field_name)[$delta]['regions'];
+    } elseif (array_key_exists($field_name, $input)) {
+      $current_values = $input[$field_name];
+      $layout_id = $current_values[$delta]['layout'];
+      $regions_values = $current_values[$delta]['regions'];
     } else {
       $item = $items[$delta];
       $layout_id = isset($item->layout) ? $item->layout : null;
@@ -389,6 +400,8 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         $regions_values = $updated_regions;
         break;
     }
+    
+    return null;
   }
 
   /**
@@ -506,14 +519,16 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $region_row['label'] = [
         '#plain_text' => $region['label'],
         '#wrapper_attributes' => [
-          'colspan' => 3
+          'colspan' => 3,
         ]
       ];
 
       $region_row['add_item'] = [
         '#type' => 'button',
+        '#is_button' => true,
         '#value' => 'Place here',
         '#name' => 'add-item-' . $regions_wrapper_id . '-' . $region_id,
+        '#id' => 'add-item-' . $regions_wrapper_id . '-' . $region_id,
         '#action' => 'add_item',
         '#regions_wrapper_id' => $regions_wrapper_id,
         '#region_id' => $region_id,
@@ -591,15 +606,17 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
           'data-region-id-input' => true,
         ],
       ];
-
+      $remove_button_id = FieldUniqueId::getUniqueId(
+        $this->fieldDefinition,
+        $delta . '-remove-item-' . $item_id
+      );
       $item_row['remove'] = [
         '#type' => 'button',
+        '#is_button' => true,
         '#value' => 'Remove',
         '#action' => 'remove_item',
-        '#name' => FieldUniqueId::getUniqueId(
-          $this->fieldDefinition,
-          $delta . '-remove-item-' . $item_id
-        ),
+        '#name' => $remove_button_id,
+        '#id' => $remove_button_id,
         '#regions_wrapper_id' => FieldUniqueId::getUniqueId(
           $this->fieldDefinition,
           $delta . '-regions-wpr'
@@ -658,7 +675,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     /** @noinspection ReferenceMismatchInspection */
     $trigger = $form_state->getTriggeringElement();
     // Replace regions
-    $regions = $this->grabRegionsElement($trigger, $form);
+    $regions = $this->grabRegionsElement($trigger, $form_state->getCompleteForm());
     $regions_wrapper_id = $regions['#regions_wrapper_id'];
 
     $replace_regions = new ReplaceCommand(
@@ -674,7 +691,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     /** @noinspection ReferenceMismatchInspection */
     $addable_items = $this->addableItemsHandler->grabAddableItemsElement(
       $trigger,
-      $form,
+      $form_state->getCompleteForm(),
       $addable_items_id
     );
     $replace_addable_items = new ReplaceCommand(
@@ -682,7 +699,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $addable_items
     );
     $response->addCommand($replace_addable_items);
-
+    
     return $response;
   }
 
@@ -736,7 +753,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $regions_form_path
     );
   }
-
+  
   /**
    * Cleanup submitted values, we don't need any information about region rows
    * at render time.

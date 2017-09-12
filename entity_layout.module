@@ -2,6 +2,7 @@
 
 use Drupal\Core\Entity\Display\EntityViewDisplayInterface;
 use Drupal\Core\Entity\EntityInterface;
+use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Render\Element;
 use Drupal\Core\Routing\RouteMatchInterface;
 
@@ -53,11 +54,36 @@ function entity_layout_entity_view_alter(array &$build, EntityInterface $entity,
 }
 
 /**
+ * Implements hook_preprocess();
+ *
  * @param $variables
+ * @param $hook
  */
 function entity_layout_preprocess(&$variables, $hook) {
   Drupal::service('entity_layout.layout_renderer')->preprocess(
     $variables,
     $hook
   );
+}
+
+/**
+ * Implements hook_form_alter().
+ *
+ * @param $form
+ * @param FormStateInterface $form_state
+ * @param $form_id
+ *
+ * @return null
+ */
+function entity_layout_form_alter(&$form, FormStateInterface $form_state, $form_id) {
+  if (false === array_key_exists('#entity_layout_fields', $form)) {
+    
+    return null;
+  }
+  Drupal::service('entity_layout.addable_items_handler')->processEntityForm(
+    $form,
+    $form_state
+  );
+  
+  return null;
 }

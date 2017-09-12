@@ -25,6 +25,54 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
   }
   
   /**
+   * Perform alterations in entity form to get addable items able to keep
+   * up-to-date over ajax partial submit
+   *
+   * @param array $form
+   * @param FormStateInterface $form_state
+   */
+  public function processEntityForm(array &$form, FormStateInterface $form_state) {
+    // Iterate over $form children and work on all multiple fields except
+    // entity_layout fields obviously
+    foreach (Element::children($form) as $key) {
+      if (
+        true === array_key_exists($key, $form['#entity_layout_fields'])
+        || false === array_key_exists('widget', $form[$key])
+        || false === array_key_exists('#field_name', $form[$key]['widget'])
+        || true !== $form[$key]['widget']['#cardinality_multiple']
+      ) {
+        continue;
+      }
+      // Grab a reference to the add_more key and work on it
+      $add_more = &$form[$key]['widget']['add_more'];
+      $add_more_children_keys = Element::children($add_more);
+      if (0 !== count($add_more_children_keys)) {
+        foreach ($add_more_children_keys as $add_more_child_key) {
+          $this->enrichAddMoreTrigger($add_more[$add_more_child_key]);
+        }
+      } else {
+        $this->enrichAddMoreTrigger($add_more);
+      }
+    }
+  }
+  
+  /**
+   * @param $add_more
+   *
+   * @return null
+   */
+  protected function enrichAddMoreTrigger(&$add_more) {
+    if (false === array_key_exists('#ajax', $add_more)) {
+      
+      return null;
+    }
+    $add_more['#action'] = 'new_field_item';
+    $add_more['#value'] .= '[]';
+    // @todo: alter #ajax property as well, override the callback to add addableItems replacement
+    return null;
+  }
+  
+  /**
    * @param FieldableEntityInterface $entity
    * @param array $used
    * @param string $addable_item_id
