@@ -3,6 +3,8 @@
 namespace Drupal\entity_layout\Service;
 
 use Drupal\Console\Core\Utils\NestedArray;
+use Drupal\Core\Ajax\AjaxResponse;
+use Drupal\Core\Ajax\ReplaceCommand;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Field\FieldDefinitionInterface;
@@ -18,6 +20,7 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
 
   /**
    * AddableItemsHandler constructor.
+   *
    * @param EntityFieldManagerInterface $entity_field_manager
    */
   public function __construct(EntityFieldManagerInterface $entity_field_manager) {
@@ -25,8 +28,8 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
   }
   
   /**
-   * Perform alterations in entity form to get addable items able to keep
-   * up-to-date over ajax partial submit
+   * Perform alterations in entity form to keep addable items up-to-date
+   * over ajax partial submit
    *
    * @param array $form
    * @param FormStateInterface $form_state
@@ -47,42 +50,89 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
       $add_more = &$form[$key]['widget']['add_more'];
       $add_more_children_keys = Element::children($add_more);
       if (0 !== count($add_more_children_keys)) {
+        // if $add_more is mulitple, iterate and alter each single button
         foreach ($add_more_children_keys as $add_more_child_key) {
-          $this->enrichAddMoreTrigger($add_more[$add_more_child_key]);
+          $this->alterAddMoreTrigger($add_more[$add_more_child_key]);
         }
       } else {
-        $this->enrichAddMoreTrigger($add_more);
+        // if $add_more is a unique button, simply alter it
+        $this->alterAddMoreTrigger($add_more);
       }
     }
   }
   
   /**
+   * Alteration function for add more item trigger
+   *
    * @param $add_more
    *
    * @return null
    */
-  protected function enrichAddMoreTrigger(&$add_more) {
+  protected function alterAddMoreTrigger(&$add_more) {
+    // Ensure we workon a ajax enabled button
+    /** @noinspection ReferenceMismatchInspection */
     if (false === array_key_exists('#ajax', $add_more)) {
       
       return null;
     }
-    $add_more['#action'] = 'new_field_item';
-    $add_more['#value'] .= '[]';
-    // @todo: alter #ajax property as well, override the callback to add addableItems replacement
+    // Store ajax callback in a separate entry then override it
+    $add_more['#ajax']['initial_callback'] = $add_more['#ajax']['callback'];
+    $add_more['#ajax']['callback'] = [
+      get_class($this),
+      'addMoreAjaxOverride'
+    ];
+    
     return null;
+  }
+  
+  /**
+   * Overriden addMoreAjax callback
+   * See Drupal\core\Field\WidgetBase::addMoreAjax()
+   *
+   * @param array $form
+   * @param FormStateInterface $form_state
+   *
+   * @return AjaxResponse
+   */
+  public static function addMoreAjaxOverride(array &$form, FormStateInterface $form_state) {
+    // @todo: we need to override any #ajax button in a field widget ...
+    // Initialize AjaxResponse
+    $response = new AjaxResponse();
+    /** @noinspection ReferenceMismatchInspection */
+    // First execute the initial callback, and store the result
+    $trigger = $form_state->getTriggeringElement();
+    $callable = implode('::', $trigger['#ajax']['initial_callback']);
+    $element = $callable($form, $form_state);
+    // Instead of returning the element, add it to a replacement command
+    $initial_replace = new ReplaceCommand(null, $element);
+    $response->addCommand($initial_replace);
+    // Find all entity_layout_fields in the form and iterate over it
+    /** @var array $entity_layout_field */
+    $entity_layout_field = $form['#entity_layout_fields'];
+    foreach ($entity_layout_field as $field_name) {
+      $children = Element::children($form[$field_name]['addable_items']);
+      // Foreach existing addable item list, perform a replacement
+      foreach ($children as $id) {
+        $addable = $form[$field_name]['addable_items'][$id];
+        $replace = new ReplaceCommand('#' . $id, $addable);
+        $response->addCommand($replace);
+      }
+    }
+    
+    return $response;
   }
   
   /**
    * @param FieldableEntityInterface $entity
    * @param array $used
    * @param string $addable_item_id
+   * @param FormStateInterface $form_state
    *
-   * @throws \InvalidArgumentException
    * @throws \LogicException
    *
    * @return array
    */
-  public function getAddableItemsElement(FieldableEntityInterface $entity, array $used, $addable_item_id) {
+  public function getAddableItemsElement(FieldableEntityInterface $entity, array $used, $addable_item_id, FormStateInterface $form_state) {
     $components = $this->getRootComponents($entity);
     $component_list = [
       '#type' => 'radios',
@@ -99,11 +149,15 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
         'delta' => null,
       ];
       if ('field' === $component['type']) {
+        // @todo: In case of widget that use subform (like paragraphs), the
+        // very last item is not in the form at this time. May be we should
+        // perform this process at after build time ? :(
         $this->buildFieldItemsAddableItemsElement(
           $entity,
           $component,
           $options,
-          $options_details
+          $options_details,
+          $form_state
         );
       }
     }
@@ -124,11 +178,11 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
    * @param array $component
    * @param array $options
    * @param array $options_details
+   * @param FormStateInterface $form_state
    *
    * @throws \InvalidArgumentException
    */
-  protected function buildFieldItemsAddableItemsElement(FieldableEntityInterface $entity, array $component, array &$options, array &$options_details) {
-    $item_count = $entity->get($component['id'])->count();
+  protected function buildFieldItemsAddableItemsElement(FieldableEntityInterface $entity, array $component, array &$options, array &$options_details, FormStateInterface $form_state) {
     $field_definition = $entity->getFieldDefinition($component['id']);
     if (null === $field_definition) {
       
@@ -137,6 +191,22 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
     $cardinality = $field_definition
       ->getFieldStorageDefinition()
       ->getCardinality();
+    /** @noinspection ReferenceMismatchInspection */
+    $values = $form_state->getValue($component['id']);
+    /** @noinspection ReferenceMismatchInspection */
+    if (null !== $values) {
+      // Do not count values but actual number of widgets in the form
+      // Because some widgets load a default item
+      $widget_children = Element::children($form_state->getCompleteForm()[$component['id']]['widget']);
+      $item_count = 0;
+      foreach ($widget_children as $child) {
+        if (is_numeric($child)) {
+          $item_count++;
+        }
+      }
+    } else {
+      $item_count = $entity->get($component['id'])->count();
+    }
     if (
       1 === $cardinality
       || $item_count < 2
@@ -159,8 +229,9 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
   /**
    * @param FieldableEntityInterface $entity
    *
-   * @return array
    * @throws \LogicException
+   *
+   * @return array
    */
   protected function getRootComponents(FieldableEntityInterface $entity) {
     $entity_type = $entity->getEntityTypeId();

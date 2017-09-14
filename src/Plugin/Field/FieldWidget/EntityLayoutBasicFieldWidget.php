@@ -1,5 +1,5 @@
 <?php
-// @todo: Find a simple way to trigger addable items update when new field item is added (server side data are actually allready updated, but not replaced front side)
+
 namespace Drupal\entity_layout\Plugin\Field\FieldWidget;
 
 use Drupal\Core\Entity\EntityForm;
@@ -144,14 +144,14 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $addable[$addable_id] = $this->addableItemsHandler->getAddableItemsElement(
       $entity,
       $used_addable_items,
-      $addable_id
+      $addable_id,
+      $form_state
     );
     $addable[$addable_id]['#prefix'] = '<div id="' . $addable_id . '">';
     $addable[$addable_id]['#suffix'] = '</div>';
-
     $addable['#tree'] = true;
-  
     // Store the names of entity_layout fields to be used later
+    // See entity_layout_form_alter().
     $entity_layout_field = $items->getFieldDefinition()->getName();
     $form['#entity_layout_fields'][$entity_layout_field] = $entity_layout_field;
     
