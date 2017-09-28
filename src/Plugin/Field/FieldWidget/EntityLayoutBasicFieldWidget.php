@@ -4,6 +4,7 @@ namespace Drupal\entity_layout\Plugin\Field\FieldWidget;
 
 use Drupal\Core\Entity\EntityForm;
 use Drupal\entity_layout\FieldUniqueId;
+use Drupal\field\Entity\FieldConfig;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DependencyInjection\Exception\ServiceCircularReferenceException;
 use Symfony\Component\DependencyInjection\Exception\ServiceNotFoundException;
@@ -137,29 +138,28 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $addable = &$field_form['addable_items'];
     /** @var EntityForm $form_object */
     $form_object = $form_state->getFormObject();
-    /** @var FieldableEntityInterface $entity */
-    $entity = $form_object->getEntity();
-    if ($entity instanceof FieldableEntityInterface) {
-      $addable[$addable_id] = $this->addableItemsHandler->getAddableItemsElement(
-        $entity,
-        $used_addable_items,
-        $addable_id,
-        $form_state
-      );
-      $addable[$addable_id]['#prefix'] = '<div id="' . $addable_id . '">';
-      $addable[$addable_id]['#suffix'] = '</div>';
-      $addable['#tree'] = true;
-      // Store the names of entity_layout fields to be used later
-      // See entity_layout_form_alter().
-      $entity_layout_field = $items->getFieldDefinition()->getName();
-      $form['#entity_layout_fields'][$entity_layout_field] = $entity_layout_field;
+    $form_entity = $form_object->getEntity();
+    if ($form_entity instanceof FieldableEntityInterface) {
+      /** @var FieldableEntityInterface $entity */
+      $entity = $form_entity;
+    } else {
+      /** @var FieldableEntityInterface $entity */
+      $entity = $items->getEntity();
     }
-    /*
-    else {
-      // @todo: try to build addable items in a default value form context
-    }
-    */
-    
+    $addable[$addable_id] = $this->addableItemsHandler->getAddableItemsElement(
+      $entity,
+      $used_addable_items,
+      $addable_id,
+      $form_state
+    );
+    $addable[$addable_id]['#prefix'] = '<div id="' . $addable_id . '">';
+    $addable[$addable_id]['#suffix'] = '</div>';
+    $addable['#tree'] = true;
+    // Store the names of entity_layout fields to be used later
+    // See entity_layout_form_alter().
+    $entity_layout_field = $items->getFieldDefinition()->getName();
+    $form['#entity_layout_fields'][$entity_layout_field] = $entity_layout_field;
+
     return $field_form;
   }
 
@@ -288,17 +288,37 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     /** @noinspection ReferenceMismatchInspection */
     $input = $form_state->getUserInput();
     $current_values = null;
+    $default_value_state = $form_state->getValue('default_value_input');
     if (null !== $form_state->getValue($field_name)) {
       $layout_id = $form_state->getValue($field_name)[$delta]['layout'];
       $regions_values = $form_state->getValue($field_name)[$delta]['regions'];
     } elseif (
+      null !== $default_value_state
+      && array_key_exists($field_name, $default_value_state)
+      && null !== $default_value_state[$field_name]
+    ) {
+      $layout_id = $default_value_state[$field_name][$delta]['layout'];
+      $regions_values = $default_value_state[$field_name][$delta]['regions'];
+    } elseif (
       array_key_exists($field_name, $input)
       && array_key_exists('layout', $input[$field_name][$delta])
-      && array_key_exists('regions', $input[$field_name][$delta])
     ) {
       $current_values = $input[$field_name];
       $layout_id = $current_values[$delta]['layout'];
-      $regions_values = $current_values[$delta]['regions'];
+      if (array_key_exists('regions', $current_values[$delta])) {
+        $regions_values = $current_values[$delta]['regions'];
+      }
+    } elseif (
+      array_key_exists('default_value_input', $input)
+      && array_key_exists($field_name, $input['default_value_input'])
+      && array_key_exists('layout', $input['default_value_input'][$field_name][$delta])
+    ) {
+      // Case of the default_value form
+      $current_values = $input['default_value_input'][$field_name];
+      $layout_id = $current_values[$delta]['layout'];
+      if (array_key_exists('regions', $current_values[$delta])) {
+        $regions_values = $current_values[$delta]['regions'];
+      }
     } else {
       $item = $items[$delta];
       $layout_id = isset($item->layout) ? $item->layout : null;
@@ -357,6 +377,7 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
 
           return null;
         }
+        ksm('passed !');
         $region_id = $trigger['#region_id'];
         /** @noinspection ReferenceMismatchInspection */
         $region_index = array_search(
@@ -433,7 +454,11 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
       $form_state->getCompleteForm(),
       $addable_items_id
     );
-    $added_item_id = $form_state->getValue('addable_items')[$addable_items_id];
+    $addable_items_state = $form_state->getValue('addable_items');
+    if (null === $addable_items_state) {
+      $addable_items_state = $form_state->getValue('default_value_input')['addable_items'];
+    }
+    $added_item_id = $addable_items_state[$addable_items_id];
 
     return $addable_items_element['#options_details'][$added_item_id];
   }

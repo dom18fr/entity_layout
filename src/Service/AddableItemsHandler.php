@@ -12,6 +12,7 @@ use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Form\FormStateInterface;
 use Drupal\Core\Render\Element;
 use Drupal\entity_layout\FieldUniqueId;
+use Drupal\field\Entity\FieldConfig;
 
 class AddableItemsHandler implements AddableItemsHandlerInterface {
 

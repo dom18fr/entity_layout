@@ -5,6 +5,7 @@ namespace Drupal\entity_layout\Service;
 use Drupal\Core\Entity\FieldableEntityInterface;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Form\FormStateInterface;
+use Drupal\field\Entity\FieldConfig;
 
 /**
  * Interface AddableItemsHandlerInterface
@@ -21,7 +22,7 @@ interface AddableItemsHandlerInterface {
    * @return array
    */
   public function getAddableItemsElement(FieldableEntityInterface $entity, array $used, $addable_item_id, FormStateInterface $form_state);
-  
+
   /**
    * @param FieldItemListInterface $items
    * @param FormStateInterface $form_state
