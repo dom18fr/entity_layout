@@ -76,13 +76,14 @@ class LayoutRenderer implements LayoutRendererInterface {
         '#entity_layout',
         $variables[$theme_info['render element']]
       )
+      && true === array_key_exists('layouts', $variables[$theme_info['render element']]['#entity_layout'])
     ) {
       // Grab a reference to the original render array
       $build = &$variables[$theme_info['render element']];
       // Store layout info then cleanup the render array
       $layout_info = $build['#entity_layout'];
       unset($build['#entity_layout']);
-      // The content part is the pone actually renderd, so work on it
+      // The content part is the one actually renderd, so work on it
       $content = &$variables['content'];
       $this->performNesting($content, $layout_info);
     }
