@@ -377,7 +377,6 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
 
           return null;
         }
-        ksm('passed !');
         $region_id = $trigger['#region_id'];
         /** @noinspection ReferenceMismatchInspection */
         $region_index = array_search(
