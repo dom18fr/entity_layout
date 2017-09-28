@@ -18,7 +18,9 @@ use Drupal\Core\TypedData\DataDefinition;
  *   id = "entity_layout_field_type",
  *   label = @Translation("Entity layout"),
  *   description = @Translation("Field type used to store layout instances and linked field items in its region."),
- *   default_widget = "entity_layout_basic_field_widget" * )
+ *   default_widget = "entity_layout_basic_field_widget",
+ *   default_formatter = "entity_layout_field_formatter",
+ * )
  */
 class EntityLayoutFieldType extends FieldItemBase {
 

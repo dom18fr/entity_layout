@@ -42,6 +42,7 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
         true === array_key_exists($key, $form['#entity_layout_fields'])
         || false === array_key_exists('widget', $form[$key])
         || false === array_key_exists('#field_name', $form[$key]['widget'])
+        || false === array_key_exists('#cardinality_multiple', $form[$key]['widget'])
         || true !== $form[$key]['widget']['#cardinality_multiple']
       ) {
         continue;

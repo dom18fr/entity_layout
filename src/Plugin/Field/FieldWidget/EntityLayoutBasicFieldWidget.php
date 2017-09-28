@@ -141,25 +141,32 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     $form_object = $form_state->getFormObject();
     /** @var FieldableEntityInterface $entity */
     $entity = $form_object->getEntity();
-    $addable[$addable_id] = $this->addableItemsHandler->getAddableItemsElement(
-      $entity,
-      $used_addable_items,
-      $addable_id,
-      $form_state
-    );
-    $addable[$addable_id]['#prefix'] = '<div id="' . $addable_id . '">';
-    $addable[$addable_id]['#suffix'] = '</div>';
-    $addable['#tree'] = true;
-    // Store the names of entity_layout fields to be used later
-    // See entity_layout_form_alter().
-    $entity_layout_field = $items->getFieldDefinition()->getName();
-    $form['#entity_layout_fields'][$entity_layout_field] = $entity_layout_field;
+    if ($entity instanceof FieldableEntityInterface) {
+      $addable[$addable_id] = $this->addableItemsHandler->getAddableItemsElement(
+        $entity,
+        $used_addable_items,
+        $addable_id,
+        $form_state
+      );
+      $addable[$addable_id]['#prefix'] = '<div id="' . $addable_id . '">';
+      $addable[$addable_id]['#suffix'] = '</div>';
+      $addable['#tree'] = true;
+      // Store the names of entity_layout fields to be used later
+      // See entity_layout_form_alter().
+      $entity_layout_field = $items->getFieldDefinition()->getName();
+      $form['#entity_layout_fields'][$entity_layout_field] = $entity_layout_field;
+    }
+    /*
+    else {
+      // @todo: try to build addable items in a default value form context
+    }
+    */
     
     return $field_form;
   }
 
   /**
-   * Build a single widget element, this is called for each occurence of a
+   * Build a single widget element, this is called for each item of a
    * multivalued field widget.
    *
    * @param FieldItemListInterface $items
