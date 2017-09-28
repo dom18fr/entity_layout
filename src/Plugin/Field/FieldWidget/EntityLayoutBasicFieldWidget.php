@@ -16,8 +16,6 @@ use Drupal\entity_layout\Service\AddableItemsHandlerInterface;
 use Drupal\Console\Core\Utils\NestedArray;
 use Drupal\Core\Ajax\AjaxResponse;
 use Drupal\Core\Ajax\ReplaceCommand;
-use Drupal\Core\Annotation\Translation;
-use Drupal\Core\Field\Annotation\FieldWidget;
 use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemListInterface;
 use Drupal\Core\Field\WidgetBase;
@@ -293,7 +291,11 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
     if (null !== $form_state->getValue($field_name)) {
       $layout_id = $form_state->getValue($field_name)[$delta]['layout'];
       $regions_values = $form_state->getValue($field_name)[$delta]['regions'];
-    } elseif (array_key_exists($field_name, $input)) {
+    } elseif (
+      array_key_exists($field_name, $input)
+      && array_key_exists('layout', $input[$field_name][$delta])
+      && array_key_exists('regions', $input[$field_name][$delta])
+    ) {
       $current_values = $input[$field_name];
       $layout_id = $current_values[$delta]['layout'];
       $regions_values = $current_values[$delta]['regions'];
