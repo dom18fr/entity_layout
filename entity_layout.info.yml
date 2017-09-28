@@ -5,4 +5,4 @@ core: 8.x
 package: Layout
 dependencies:
   - field
-#  - layout_plugin
+  - layout_discovery
