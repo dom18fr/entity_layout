@@ -47,6 +47,7 @@ class LayoutRenderer implements LayoutRendererInterface {
         continue;
       }
       $build['#entity_layout']['weight'] = $build[$name]['#weight'];
+      $build['#entity_layout']['display_unused'] = $build[$name]['#display_unused'];
       // Store the name of the component that contain entity_layout data
       foreach(Element::getVisibleChildren($build[$name]) as $delta) {
         $build['#entity_layout']['layouts'][$delta] = $build[$name][$delta];
@@ -82,10 +83,19 @@ class LayoutRenderer implements LayoutRendererInterface {
       $build = &$variables[$theme_info['render element']];
       // Store layout info then cleanup the render array
       $layout_info = $build['#entity_layout'];
+      $display_unused = $layout_info['display_unused'];
       unset($build['#entity_layout']);
       // The content part is the one actually renderd, so work on it
       $content = &$variables['content'];
       $this->performNesting($content, $layout_info);
+      if (false === $display_unused) {
+        foreach ($content as $name => &$element) {
+          if ('_entity_layout' === $name) {
+            continue;
+          }
+          $element['#access'] = false;
+        }
+      }
     }
   }
 
