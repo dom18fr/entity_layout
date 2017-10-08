@@ -113,6 +113,64 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
   }
 
   /**
+   * @param array $form
+   * @param FormStateInterface $form_state
+   *
+   * @return array
+   */
+  public function settingsForm(array $form, FormStateInterface $form_state) {
+    $form = parent::settingsForm($form, $form_state);
+
+    $form['layout_list'] = [
+      'mode' => [
+        '#type' => 'radios',
+        '#options' => [
+          'include' => $this->t('Only selected'),
+          'exclude' => $this->t('All except selected'),
+        ],
+        '#default_value' => $this->getSetting('layout_list')['mode'],
+      ],
+      'list' => [
+        '#type' => 'checkboxes',
+        '#options' => $this->getCategorizedLayoutList('settings'),
+        '#default_value' => $this->getSetting('layout_list')['list'],
+      ]
+    ];
+
+    return $form;
+  }
+
+  /**
+   * @return array
+   */
+  public static function defaultSettings() {
+    return [
+      'layout_list' => [
+        'mode' => 'exclude',
+        'list' => [],
+      ],
+    ];
+  }
+
+  /**
+   * @return array
+   */
+  public function settingsSummary() {
+    $layout_list = $this->getSetting('layout_list');
+    $list = [];
+    foreach ($layout_list['list'] as $key => $value) {
+      if (0 === $value) {
+        continue;
+      }
+      $list[] = $value;
+    }
+
+    return [
+      '#markup' => $layout_list['mode'] . ' : ' . implode(', ', $list),
+    ];
+  }
+
+  /**
    * Build the widget container wrapping the whole items of an multivalued field.
    * The addable items input is built at widget container level.
    *
@@ -465,28 +523,51 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
    * Build a categorized layout list to be displayed in a select input.
    * Provider and category are concatenated in a single "group".
    *
+   * @param string $context
    * @return array
    */
-  protected function getCategorizedLayoutList() {
+  protected function getCategorizedLayoutList($context = 'widget') {
     // Build Layouts list to be render as grouped select options
     $layout_list = [];
     if (null !== $this->layoutPlugins) {
       // Initialize option group
       $current_category = null;
       // Iterate over each layout plugin definition and create relevants options
+      $setting = [];
+      if ('widget' === $context) {
+        $setting = $this->getSetting('layout_list');
+      }
       foreach ($this->layoutPlugins as $plugin_id => $plugin_info) {
-        // Create a combined option group using provider and category
-        $combined_category = implode(
-          ' | ', [$plugin_info->getProvider(), $plugin_info->getCategory()]
-        );
-        // Manage proper grouping logic based on $current_category
-        if ($combined_category !== $current_category) {
-          $current_category = $combined_category;
-          $layout_list[$current_category] = [];
-        }
-        // Finally set option key and value in the relevant group
         $label = $plugin_info->getLabel();
-        $layout_list[$current_category][$plugin_id] = $label;
+        if ('widget' === $context) {
+          if (
+            false === array_key_exists($plugin_id, $setting['list'])
+            || (
+              'include' === $setting['mode']
+              && 0 === $setting['list'][$plugin_id]
+            )
+            || (
+              'exclude' === $setting['mode']
+              && 0 !== $setting['list'][$plugin_id]
+            )
+          ) {
+            continue;
+          }
+          // Create a combined option group using provider and category
+          $combined_category = implode(
+            ' | ', [$plugin_info->getProvider(), $plugin_info->getCategory()]
+          );
+          // Manage proper grouping logic based on $current_category
+          if ($combined_category !== $current_category) {
+            $current_category = $combined_category;
+            $layout_list[$current_category] = [];
+          }
+          $layout_list[$current_category][$plugin_id] =  $label;;
+        } else {
+          $combined_category = '(<em>' . $this->t('Module') . ' : ' . $plugin_info->getProvider()
+            . ', ' . $this->t('Group') . ' : ' . $plugin_info->getCategory() . '</em>)';
+          $layout_list[$plugin_id] = '<strong>' . $label . '</strong> ' . $combined_category;
+        }
       }
     }
 
