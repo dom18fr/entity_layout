@@ -541,13 +541,16 @@ class EntityLayoutBasicFieldWidget extends WidgetBase implements ContainerFactor
         $label = $plugin_info->getLabel();
         if ('widget' === $context) {
           if (
-            false === array_key_exists($plugin_id, $setting['list'])
-            || (
+            (
               'include' === $setting['mode']
-              && 0 === $setting['list'][$plugin_id]
+              && (
+                0 === $setting['list'][$plugin_id]
+                || false === array_key_exists($plugin_id, $setting['list'])
+              )
             )
             || (
               'exclude' === $setting['mode']
+              && true === array_key_exists($plugin_id, $setting['list'])
               && 0 !== $setting['list'][$plugin_id]
             )
           ) {
