@@ -43,6 +43,7 @@ class LayoutRenderer implements LayoutRendererInterface {
       if (
         false === array_key_exists('type', $component)
         || 'entity_layout_field_formatter' !== $component['type']
+        || false === array_key_exists($name, $build)
       ) {
         continue;
       }
@@ -61,8 +62,6 @@ class LayoutRenderer implements LayoutRendererInterface {
    *
    * @param array $variables
    * @param string $hook
-   *
-   * @throws PluginException
    */
   public function preprocess(array &$variables, $hook) {
     // Get information about current hook from registry
@@ -102,9 +101,6 @@ class LayoutRenderer implements LayoutRendererInterface {
   /**
    * @param array $content
    * @param array $layout_info
-   *
-   * @throws PluginNotFoundException
-   * @throws PluginException
    */
   protected function performNesting(array &$content, array $layout_info) {
     $content['_entity_layout'] = [
@@ -120,6 +116,7 @@ class LayoutRenderer implements LayoutRendererInterface {
       $renderable_layout['#weight'] = $delta;
       $content['_entity_layout'][$delta] = $renderable_layout;
     }
+    $this->fixDeltas($content['_entity_layout']);
   }
 
   /**
@@ -187,4 +184,34 @@ class LayoutRenderer implements LayoutRendererInterface {
 
     return [];
   }
+
+  /**
+   * After elements have been dipatched over layouts, some field items deltas index may be broken.
+   * Let's rewrite proper index starting with 0 to get multiple fields rendered properly.
+   * 
+   * @param array $layouts
+   */
+  protected function fixDeltas(array &$layouts) {
+    foreach (Element::getVisibleChildren($layouts) as $layout_delta) {
+      $layout = &$layouts[$layout_delta];
+      foreach (Element::getVisibleChildren($layout) as $region_name) {
+        $region = &$layout[$region_name];
+        foreach ($region as $element_name => &$element) {
+          if (
+            false === array_key_exists('#is_multiple', $element)
+            || false === $element['#is_multiple']
+          ) {
+            continue;
+          }
+          $items = [];
+          foreach (Element::getVisibleChildren($element) as $delta) {
+            $items[] = $element[$delta];
+            unset($element[$delta]);
+          }
+          $element = array_merge($element, $items);
+        }
+      }
+    }
+  }
+  
 }
