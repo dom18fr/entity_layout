@@ -49,6 +49,10 @@ class AddableItemsHandler implements AddableItemsHandlerInterface {
         continue;
       }
       // Grab a reference to the add_more key and work on it
+      $add_more = [];
+      if (!empty($form[$key]['widget']['add_more'])) {
+        $add_more = &$form[$key]['widget']['add_more'];
+      }
       $add_more = &$form[$key]['widget']['add_more'];
       $add_more_children_keys = Element::children($add_more);
       if (0 !== count($add_more_children_keys)) {
